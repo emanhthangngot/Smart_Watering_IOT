@@ -18,16 +18,20 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 import api.routers as routers_pkg
+import api.wiring as wiring
 from api.runtime import runtime
 
 
 @asynccontextmanager
 async def lifespan(app_instance: FastAPI):
     del app_instance
+    wiring.build()
     await runtime.start()
+    await wiring.start()
     try:
         yield
     finally:
+        await wiring.stop()
         await runtime.stop()
 
 

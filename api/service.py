@@ -24,6 +24,20 @@ from .simulator import (
 class FarmWorkflowPort(Protocol):
     def submit_request(self, request: dict[str, Any]) -> None: ...
 
+    def on_approved(self, plan: dict[str, Any], approval: dict[str, Any]) -> None:
+        """Optional: called after a plan is APPROVEd, before the HTTP response
+        returns. Absent on workflows that do not execute anything on approval."""
+
+
+class TelemetryPort(Protocol):
+    """Read-only façade the real `FarmPipeline` implements (api/pipeline.py)."""
+
+    def health_snapshot(self) -> dict[str, Any]: ...
+
+    def farm_state_snapshot(self) -> dict[str, Any]: ...
+
+    def scope_verdicts(self) -> list[dict[str, Any]]: ...
+
 
 def utc_now() -> datetime:
     return datetime.now(UTC)
@@ -42,6 +56,8 @@ class FarmOpsService:
         self.audit: list[dict[str, Any]] = []
         self.simulator_control: SimulatorControlGate | None = None
         self.workflow: FarmWorkflowPort | None = None
+        self.telemetry: TelemetryPort | None = None
+        self.active_plans: dict[str, str] = {}  # plan_lineage_id -> plan_revision_id
 
     def create_farm_request(
         self,
@@ -103,11 +119,30 @@ class FarmOpsService:
 
     def farm_state(self) -> dict[str, Any]:
         with self._lock:
+            telemetry = self.telemetry.farm_state_snapshot() if self.telemetry is not None else {}
+            active_plan = None
+            for lineage_id, revision_id in self.active_plans.items():
+                plan = self.plans.get(revision_id)
+                if plan is not None and plan.get("status") in {"PROPOSED", "APPROVED", "EXECUTING"}:
+                    active_plan = {"planLineageId": lineage_id, "planRevisionId": revision_id}
             return {
-                "status": "PARTIAL",
-                "farmStateVersion": 0,
+                "status": "PARTIAL" if self.telemetry is None else "OK",
+                "farmStateVersion": telemetry.get("farmStateVersion", 0),
+                "updatedAt": telemetry.get("updatedAt"),
+                "devices": telemetry.get("devices", []),
+                "evidenceHealth": telemetry.get(
+                    "evidenceHealth",
+                    {
+                        "state": "UNKNOWN",
+                        "source": "CONSERVATIVE_FALLBACK",
+                        "reasons": [],
+                        "requiredDeviceCodes": [],
+                    },
+                ),
+                "activePlan": active_plan,
+                "anomalies": [],
                 "integration": {
-                    "dataPlane": "UNAVAILABLE",
+                    "dataPlane": "AVAILABLE" if self.telemetry is not None else "UNAVAILABLE",
                     "agents": "AVAILABLE" if self.workflow is not None else "UNAVAILABLE",
                 },
                 "plans": copy.deepcopy(list(self.plans.values())),
@@ -175,7 +210,19 @@ class FarmOpsService:
                 operator,
                 {"approvalId": approval_id, "planRevisionId": plan_revision_id},
             )
-            return approval
+            workflow = self.workflow
+            plan_snapshot = copy.deepcopy(plan)
+        if decision == "APPROVE" and workflow is not None:
+            on_approved = getattr(workflow, "on_approved", None)
+            if callable(on_approved):
+                try:
+                    on_approved(plan_snapshot, dict(approval))
+                except Exception:
+                    with self._lock:
+                        self._system_audit(
+                            "approval.execution_failed", {"planRevisionId": plan_revision_id}
+                        )
+        return approval
 
     def list_tasks(self) -> list[dict[str, Any]]:
         with self._lock:
@@ -231,6 +278,46 @@ class FarmOpsService:
     def configure_workflow(self, workflow: FarmWorkflowPort) -> None:
         with self._lock:
             self.workflow = workflow
+
+    def configure_telemetry(self, telemetry: TelemetryPort) -> None:
+        with self._lock:
+            self.telemetry = telemetry
+
+    def upsert_plan(self, plan: dict[str, Any]) -> None:
+        with self._lock:
+            self.plans[plan["planRevisionId"]] = plan
+
+    def set_active_plan(self, plan_lineage_id: str, plan_revision_id: str) -> None:
+        with self._lock:
+            self.active_plans[plan_lineage_id] = plan_revision_id
+
+    def set_plan_status(self, plan_revision_id: str, plan_status: str) -> None:
+        with self._lock:
+            plan = self.plans.get(plan_revision_id)
+            if plan is not None:
+                plan["status"] = plan_status
+
+    def record_verification(self, plan_revision_id: str, verification: dict[str, Any]) -> None:
+        with self._lock:
+            plan = self.plans.get(plan_revision_id)
+            if plan is not None:
+                plan.setdefault("verifications", []).append(verification)
+
+    def append_timeline_event(self, trace_id: str, event: dict[str, Any]) -> None:
+        with self._lock:
+            self.timeline.setdefault(trace_id, []).append(event)
+
+    def record_explanation(self, decision_id: str, nodes: list[dict[str, Any]]) -> None:
+        with self._lock:
+            self.explanations[decision_id] = {"decisionId": decision_id, "nodes": nodes}
+
+    def add_task(self, task: dict[str, Any]) -> None:
+        with self._lock:
+            self.tasks[task["id"]] = task
+
+    def scope_verdicts(self) -> list[dict[str, Any]]:
+        with self._lock:
+            return self.telemetry.scope_verdicts() if self.telemetry is not None else []
 
     def submit_sim_command(
         self,
@@ -329,16 +416,21 @@ class FarmOpsService:
         return expired
 
     def health(self) -> dict[str, Any]:
+        snapshot = self.telemetry.health_snapshot() if self.telemetry is not None else None
         return {
-            "status": "degraded",
+            "status": (snapshot or {}).get("status", "degraded"),
             "uptimeSeconds": round(time.monotonic() - self.started_at, 3),
-            "batchPeriodSeconds": None,
-            "lateRatio": None,
-            "clockSkewSeconds": None,
-            "outboxDepth": None,
+            "batchPeriodSeconds": (snapshot or {}).get("batchPeriodSeconds"),
+            "lateRatio": (snapshot or {}).get("lateRatio"),
+            "clockSkewSeconds": (snapshot or {}).get("clockSkewSeconds"),
+            "outboxDepth": (snapshot or {}).get("outboxDepth"),
+            "missingDevices": (snapshot or {}).get("missingDevices", []),
+            "reasons": (snapshot or {}).get(
+                "reasons", [] if snapshot is not None else ["data plane not wired"]
+            ),
             "integrations": {
-                "dataPlane": "pending M1",
-                "trust": "pending M2",
+                "dataPlane": "ready" if self.telemetry is not None else "pending M1",
+                "trust": "ready" if self.telemetry is not None else "pending M2",
                 "agents": "ready" if self.workflow is not None else "pending M3",
             },
         }
