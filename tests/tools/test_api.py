@@ -263,3 +263,15 @@ def test_read_endpoints_are_available_without_auth() -> None:
     assert client.get("/health").status_code == 200
     assert client.get("/farm/state").status_code == 200
     assert client.get("/trust/current").json()["status"] == "UNAVAILABLE"
+
+
+def test_local_frontend_origin_can_call_backend() -> None:
+    response = TestClient(app).options(
+        "/farm/state",
+        headers={
+            "Origin": "http://localhost:3000",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://localhost:3000"

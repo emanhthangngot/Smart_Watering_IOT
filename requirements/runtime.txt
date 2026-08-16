@@ -1,0 +1,4 @@
+# Minimal backend runtime: FastAPI + PostgreSQL + MQTT + M4 durable adapters.
+-r base.txt
+-r data-plane.txt
+-r tools-runner-api.txt

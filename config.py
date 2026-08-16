@@ -46,6 +46,25 @@ class Config:
     llm_timeout_seconds: float = 8.0
     llm_max_output_tokens: int = 512
     llm_egress_allowlist: tuple[str, ...] = ()
+    # Bounded buffering keeps the live worker safe on the small demo server.
+    mqtt_queue_max: int = 128
+    cors_origins: tuple[str, ...] = (
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    )
+
+    @property
+    def mqtt_enabled(self) -> bool:
+        """MQTT is optional; database-backed reads still work without it."""
+        return bool(
+            self.mqtt_host
+            and self.mqtt_username
+            and self.mqtt_password
+            and self.mqtt_client_id
+            and self.mqtt_topic
+        )
 
     @property
     def llm_enabled(self) -> bool:
@@ -56,6 +75,11 @@ class Config:
     @classmethod
     def from_env(cls) -> Config:
         allowlist_raw = _env("LLM_EGRESS_ALLOWLIST", "")
+        cors_raw = _env(
+            "CORS_ORIGINS",
+            "http://localhost:3000,http://127.0.0.1:3000,"
+            "http://localhost:5173,http://127.0.0.1:5173",
+        )
         return cls(
             team_code=_env("TEAM_CODE", "VAMOS"),
             environment=_env("FARM_ENVIRONMENT", "FARM"),
@@ -77,4 +101,6 @@ class Config:
             llm_egress_allowlist=tuple(
                 host.strip() for host in allowlist_raw.split(",") if host.strip()
             ),
+            mqtt_queue_max=max(1, int(_env("MQTT_QUEUE_MAX", "128"))),
+            cors_origins=tuple(origin.strip() for origin in cors_raw.split(",") if origin.strip()),
         )

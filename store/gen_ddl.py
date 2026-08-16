@@ -59,7 +59,7 @@ def _gen_readings_all_view() -> str:
             "  select id, "
             f"'{spec.device_code}' as device, '{spec.metric}' as metric, "
             f"{spec.metric} as value, epoch, event_time, received_at, "
-            f"source_status, late, scenario\n"
+            f"source_status, late, scenario, team_code\n"
             f"    from {table} where {spec.metric} is not null"
         )
     body = "\n  union all\n".join(branches)
@@ -72,7 +72,16 @@ def _gen_ingest_batch_rpc() -> str:
         table = _table_name(device_code)
         specs = metrics_for_device(device_code)
         insert_cols = ", ".join(
-            ["id", "epoch", "event_time", "team_code", "scenario", "source_status", "late"]
+            [
+                "id",
+                "epoch",
+                "event_time",
+                "received_at",
+                "team_code",
+                "scenario",
+                "source_status",
+                "late",
+            ]
             + [spec.metric for spec in specs]
         )
         metric_values = ", ".join(
@@ -86,7 +95,8 @@ def _gen_ingest_batch_rpc() -> str:
         # device-batch row (§3.2) and computes `late` from the watermark;
         # this RPC must not mint a second, disagreeing id.
         values = (
-            "(d->>'id'), v_epoch, v_event_time, v_team_code, v_scenario, (d->>'status'), v_late"
+            "(d->>'id'), v_epoch, v_event_time, v_received_at, v_team_code, "
+            "v_scenario, (d->>'status'), v_late"
         )
         if metric_values:
             values = f"{values}, {metric_values}"
@@ -108,6 +118,16 @@ declare
   v_team_code  text := payload->>'teamCode';
   v_scenario   text := payload->>'scenario';
   v_late       boolean := coalesce((payload->>'late')::boolean, false);
+  v_batch_id   text := coalesce(payload->>'batchId', 'b_' || md5(payload::text));
+  v_received_at timestamptz := coalesce(
+    (payload->>'sourceReceivedAt')::timestamptz,
+    now()
+  );
+  v_device_codes jsonb := coalesce(
+    payload->'deviceCodes',
+    (select coalesce(jsonb_agg(item->>'deviceCode'), '[]'::jsonb)
+       from jsonb_array_elements(coalesce(payload->'devices', '[]'::jsonb)) item)
+  );
   d            jsonb;
 begin
   for d in select * from jsonb_array_elements(coalesce(payload->'devices', '[]'::jsonb)) loop
@@ -118,6 +138,14 @@ begin
         null;
     end case;
   end loop;
+  insert into ingest_batches (
+    batch_id, epoch, event_time, source_received_at, team_code, environment,
+    scenario, device_codes, reading_count
+  ) values (
+    v_batch_id, v_epoch, v_event_time, v_received_at, v_team_code,
+    coalesce(payload->>'environment', ''), v_scenario, v_device_codes,
+    coalesce((payload->>'readingCount')::int, 0)
+  ) on conflict (batch_id) do nothing;
 end;
 $$ language plpgsql;
 """
@@ -274,6 +302,23 @@ create table if not exists trust_snapshots (
   created_at          timestamptz not null default now()
 );
 
+-- Durable batch-level evidence distinguishes a stopped whole feed from one
+-- device omitted by newer snapshots and survives API/worker restarts.
+create table if not exists ingest_batches (
+  batch_id            text primary key,
+  epoch               bigint not null,
+  event_time          timestamptz not null,
+  source_received_at  timestamptz not null,
+  stored_at           timestamptz not null default now(),
+  team_code           text not null,
+  environment         text not null,
+  scenario            text,
+  device_codes        jsonb not null default '[]'::jsonb,
+  reading_count       int not null default 0
+);
+create index if not exists ingest_batches_team_received
+  on ingest_batches (team_code, source_received_at desc);
+
 -- schedule/models.py::Schedule, schedule/claim.py::ScheduleRepository.
 -- Added for coordination gate C4 (durable schedule state across restart);
 -- mirrors InMemoryScheduleRepository's column shape 1:1.
@@ -326,6 +371,7 @@ def _gen_rls() -> str:
         "notifications",
         "audit_log",
         "trust_snapshots",
+        "ingest_batches",
         "schedules",
     ]
     for table in all_tables:

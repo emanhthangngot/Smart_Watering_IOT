@@ -23,6 +23,7 @@ class RuntimeCoordinator:
         *,
         startup_recovery: Job | None = None,
         schedule_runner: ForeverRunner | None = None,
+        data_plane_runner: ForeverRunner | None = None,
         retention_job: Job | None = None,
         expiry_job: Job | None = None,
         retention_interval_seconds: float = 3600,
@@ -32,6 +33,7 @@ class RuntimeCoordinator:
             raise ValueError("runtime intervals must be positive")
         self.startup_recovery = startup_recovery
         self.schedule_runner = schedule_runner
+        self.data_plane_runner = data_plane_runner
         self.retention_job = retention_job
         self.expiry_job = expiry_job
         self.retention_interval_seconds = retention_interval_seconds
@@ -57,6 +59,13 @@ class RuntimeCoordinator:
             self.schedule_runner = schedule_runner
             self.retention_job = retention_job
 
+    def configure_data_plane(self, runner: ForeverRunner | None) -> None:
+        """Install or disable the live MQTT worker while the app is stopped."""
+        with self._lock:
+            if self._started:
+                raise RuntimeError("runtime cannot be reconfigured while running")
+            self.data_plane_runner = runner
+
     async def start(self) -> None:
         with self._lock:
             if self._started:
@@ -77,6 +86,13 @@ class RuntimeCoordinator:
                 asyncio.create_task(
                     self._guarded_forever("scheduleRunner", self.schedule_runner.run_forever),
                     name="farmops-schedule-runner",
+                )
+            )
+        if self.data_plane_runner is not None:
+            self._tasks.append(
+                asyncio.create_task(
+                    self._guarded_forever("dataPlane", self.data_plane_runner.run_forever),
+                    name="farmops-live-data-plane",
                 )
             )
         if self.retention_job is not None:
@@ -117,6 +133,13 @@ class RuntimeCoordinator:
                     if self._started and self.schedule_runner is not None
                     else "BLOCKED_M1"
                     if self.schedule_runner is None
+                    else "STOPPED"
+                ),
+                "dataPlane": (
+                    "RUNNING"
+                    if self._started and self.data_plane_runner is not None
+                    else "DISABLED"
+                    if self.data_plane_runner is None
                     else "STOPPED"
                 ),
                 "retention": "READY" if self.retention_job is not None else "BLOCKED_M1",
