@@ -11,6 +11,7 @@ plans/260816-0957-farmops-delivery/phase-01-skeleton-and-config.md
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import logging
 import pkgutil
@@ -23,6 +24,7 @@ import api.routers as routers_pkg
 from api.bootstrap import build_schedule_runner
 from api.runtime import runtime
 from api.service import service
+from api.workflow import build_workflow
 from config import Config
 from ingest.worker import LiveIngestionWorker
 from store.db import close_pool, get_pool
@@ -45,6 +47,7 @@ async def lifespan(app_instance: FastAPI):
     )
     runtime.configure_data_plane(worker)
     runtime.configure_schedule_runner(build_schedule_runner(config, service))
+    service.configure_workflow(build_workflow(service, read_model, asyncio.get_running_loop()))
     try:
         pool = await get_pool()
         await apply_live_ingestion_migration(pool)
@@ -60,6 +63,7 @@ async def lifespan(app_instance: FastAPI):
         await runtime.stop()
         runtime.configure_data_plane(None)
         runtime.configure_schedule_runner(None)
+        service.workflow = None
         service.configure_data_plane(None, mqtt_enabled=False)
         await close_pool()
 

@@ -148,14 +148,14 @@ def build_schedule_runner(
     # "none" (observation-only) rather than crash startup or pretend to
     # control a pump we can't reach. Used consistently below so the
     # actuator and the outcome-verification semantics never disagree.
-    effective_actuation_target = "none" if config.actuation_target == "sim" else config.actuation_target
+    effective_actuation_target = (
+        "none" if config.actuation_target == "sim" else config.actuation_target
+    )
     try:
         repository: ScheduleRepository = PostgresScheduleRepository()
         actuator = actuator_for(effective_actuation_target)
     except Exception as error:
-        logger.warning(
-            "schedule runner disabled, postgres unavailable: %s", type(error).__name__
-        )
+        logger.warning("schedule runner disabled, postgres unavailable: %s", type(error).__name__)
         return None
 
     read_model = PostgresFarmStateRepository(config.team_code)
