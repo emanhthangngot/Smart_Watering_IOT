@@ -262,6 +262,35 @@ create table if not exists trust_snapshots (
   created_at          timestamptz not null default now()
 );
 
+-- schedule/models.py::Schedule, schedule/claim.py::ScheduleRepository.
+-- Added for coordination gate C4 (durable schedule state across restart);
+-- mirrors InMemoryScheduleRepository's column shape 1:1.
+create table if not exists schedules (
+  schedule_id            text primary key,
+  plan_revision_id       text not null,
+  pump_id                text not null,
+  start_at               timestamptz not null,
+  end_at                 timestamptz not null,
+  status                 text not null,
+  claimed_by             text,
+  verification_result    text,
+  late_verification      boolean not null default false,
+  status_reason          text,
+  planned_drawdown_pct   double precision not null default 0,
+  planned_pump_minutes   double precision not null default 0,
+  closing_started_at     timestamptz,
+  closing_failure        text,
+  actuator_stopped       boolean not null default false,
+  verification_attempts  int not null default 0,
+  created_at             timestamptz not null default now()
+);
+-- DB-enforced single-RUNNING-schedule-per-pump: the concurrency guarantee
+-- InMemoryScheduleRepository checks in application code, closed here as a
+-- constraint so two concurrent claims can never both win.
+create unique index if not exists schedules_one_running_per_pump
+  on schedules (pump_id) where status = 'RUNNING';
+create index on schedules (status) where status not in ('DONE', 'FAILED', 'MISSED', 'CANCELLED');
+
 create or replace function ingest_batch(payload jsonb) returns void as $$
 declare
   v_epoch      bigint := (payload->>'epoch')::bigint;
@@ -330,3 +359,4 @@ alter table inspection_tasks enable row level security;
 alter table notifications enable row level security;
 alter table audit_log enable row level security;
 alter table trust_snapshots enable row level security;
+alter table schedules enable row level security;
