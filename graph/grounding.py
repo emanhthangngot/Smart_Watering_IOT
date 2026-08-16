@@ -25,14 +25,22 @@ class SemanticClaimMismatch(GroundingError):
     """Raised when a cited evidence record does not support the claim."""
 
 
-_UUID_REF = re.compile(
-    r"^r_[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}#[A-Za-z0-9_]+$"
-)
+# M1's real reading_id is "r_" + sha256(canonical row)[:24] — a lowercase
+# hex digest, deliberately deterministic (not a random UUIDv4) so an exact
+# MQTT redelivery or outbox replay hashes to the same id and dedupes via
+# `on conflict (id) do nothing` (ingest/normalize.py::_reading_id). The
+# original C0/C8-recorded decision assumed a random UUIDv4; that decision
+# is superseded for the reading-id half of the contract by this real,
+# load-bearing dedup behavior — reversed with that evidence, not silently.
+# A hex-or-dashed id of 8-64 chars accepts both M1's hash id and a UUIDv4
+# (dashed), so this parser does not have to be re-tightened if the id
+# shape changes again within that family.
+_EVIDENCE_REF = re.compile(r"^r_[0-9a-fA-F-]{8,64}#[A-Za-z0-9_]+$")
 
 
 def split_evidence_ref(ref: str) -> tuple[str, str]:
-    if not isinstance(ref, str) or not _UUID_REF.fullmatch(ref):
-        raise GroundingError("evidence ref must be r_<uuidv4>#<metric>")
+    if not isinstance(ref, str) or not _EVIDENCE_REF.fullmatch(ref):
+        raise GroundingError("evidence ref must be r_<reading-id>#<metric>")
     reading_id, metric = ref.split("#", 1)
     return reading_id, metric
 

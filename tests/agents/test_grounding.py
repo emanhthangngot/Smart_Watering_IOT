@@ -26,6 +26,23 @@ def test_membership_and_metric_qualified_ref() -> None:
     assert error.value.missing == ("missing",)
 
 
+def test_split_evidence_ref_accepts_m1s_real_hash_based_reading_id() -> None:
+    # ingest/normalize.py::_reading_id — "r_" + sha256(canonical)[:24], a
+    # deterministic lowercase hex digest, not a random UUIDv4. See C8 note
+    # in graph/grounding.py.
+    ref = "r_9f1c2e4a7b3d5f60189c2ab4#tank_level"
+    assert split_evidence_ref(ref) == ("r_9f1c2e4a7b3d5f60189c2ab4", "tank_level")
+
+
+def test_split_evidence_ref_rejects_missing_metric_or_bad_charset() -> None:
+    with pytest.raises(GroundingError):
+        split_evidence_ref("r_9f1c2e4a7b3d5f60189c2ab4")
+    with pytest.raises(GroundingError):
+        split_evidence_ref("r_9f1c2e4a7b3d5f60189c2ab4#level\nmore")
+    with pytest.raises(GroundingError):
+        split_evidence_ref("not_r_prefixed#level")
+
+
 def test_typed_claim_checks_semantics_and_version() -> None:
     evidence = DecisionEvidenceView(REF, "level", value=50, unit="%", source_state_version=3)
     validate_sensor_claim(

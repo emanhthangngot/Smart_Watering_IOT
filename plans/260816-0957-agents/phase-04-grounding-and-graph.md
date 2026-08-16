@@ -22,7 +22,8 @@ Build grounding, edge validation, and backward BFS as pure data operations now. 
 ## Requirements
 
 - Functional: `assert_grounded()` rejects every requested ref absent from the supplied available-ref set; it proves membership only, never semantic truth.
-- Functional: accepted evidence format is metric-qualified `r_<UUIDv4>#metric`; C8 selected the collision-safe identity, while C0 must still freeze the shared serializer before adapters.
+- Functional: accepted evidence format is metric-qualified `r_<reading-id>#metric` where `reading-id` is 8-64 hex/dash characters; C0 must still freeze the shared serializer before adapters.
+- **Decision superseding the C8 note below (2026-08-16, verified against `dev@0cf1ffa`, `ingest/normalize.py::_reading_id`):** M1's real reading IDs are `r_` + `sha256(canonical row)[:24]`, a deterministic hex digest, not a random UUIDv4 — deliberately so an exact MQTT redelivery or outbox replay hashes to the same id and dedupes via `on conflict (id) do nothing`. Forcing UUIDv4 here would either reject every real evidence ref M1 produces, or force M1 to drop that dedup guarantee. The parser now accepts hex-or-dashed ids in the 8-64 char range, covering both M1's hash id and a UUIDv4 should C8 still land on one later.
 - Functional: numeric/status claims are accepted only when a typed decision-time evidence view proves metric, value/status, unit, state version, trust/freshness, and cited ref agree; unsupported semantic claims fall back to deterministic wording.
 - Functional: narration gets at most 2 grounding retries; the third path is deterministic allocation/reasons with no narration.
 - Functional: relations are exactly `supports`, `derived_from`, `produced`, `verified_by`, `invalidates`.
