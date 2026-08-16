@@ -43,7 +43,7 @@ class ClockTracker:
             return False
         try:
             parsed = parse_iso_epoch(timestamp)
-        except ValueError:
+        except (AttributeError, TypeError, ValueError):
             return False
         return abs(epoch - parsed) > TIME_FIELD_MISMATCH_THRESHOLD_S
 

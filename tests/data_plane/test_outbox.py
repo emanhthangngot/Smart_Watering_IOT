@@ -91,6 +91,7 @@ def test_network_failure_writes_to_outbox_not_lost(monkeypatch, _reset_outbox):
     lines = _reset_outbox.read_text().splitlines()
     payload = json.loads(lines[0])
     assert payload["epoch"] == 1786847816
+    assert payload["eventTime"] == "2026-08-16T02:36:56.000Z"
     assert payload["devices"][0]["deviceCode"] == "TANK_01"
     assert payload["devices"][0]["id"] == "r_abc123"
 

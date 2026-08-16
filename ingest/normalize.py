@@ -8,8 +8,9 @@ counted, never raised.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import math
-import secrets
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -50,8 +51,31 @@ class NormalizeResult:
     filtered: bool = False
 
 
-def _reading_id() -> str:
-    return "r_" + secrets.token_hex(3)
+def _reading_id(batch: dict, device: dict, epoch: int) -> str:
+    """Build a stable id for one device row in one MQTT snapshot.
+
+    The real broker publishes about twice per second while ``epoch`` only has
+    second precision, so ``(team_code, epoch)`` is not a safe idempotency key.
+    Hashing the canonical source row preserves both same-second snapshots and
+    still deduplicates an exact MQTT redelivery or outbox replay.
+    """
+    identity = {
+        "teamCode": batch.get("teamCode"),
+        "environment": batch.get("environment"),
+        "timestamp": batch.get("timestamp"),
+        "epoch": epoch,
+        "deviceCode": device.get("deviceCode"),
+        "status": device.get("status"),
+        "metrics": device.get("metrics"),
+    }
+    canonical = json.dumps(
+        identity,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        default=repr,
+    )
+    return "r_" + hashlib.sha256(canonical.encode()).hexdigest()[:24]
 
 
 def _resolve_epoch(batch: dict) -> tuple[int | None, bool]:
@@ -63,8 +87,8 @@ def _resolve_epoch(batch: dict) -> tuple[int | None, bool]:
         return int(epoch), True
     if timestamp is not None:
         try:
-            return int(round(parse_iso_epoch(timestamp))), False
-        except (ValueError, TypeError):
+            return int(parse_iso_epoch(timestamp)), False
+        except (AttributeError, TypeError, ValueError):
             return None, False
     return None, False
 
@@ -96,8 +120,17 @@ def normalize_batch(
         return NormalizeResult(epoch=epoch, audit=audit, dropped=True), counters
 
     timestamp = batch.get("timestamp")
+    time_field_mismatch = False
+    parsed_timestamp: float | None = None
+    if timestamp is not None:
+        try:
+            parsed_timestamp = parse_iso_epoch(timestamp)
+        except (AttributeError, TypeError, ValueError):
+            parsed_timestamp = None
+
     if had_epoch and timestamp is not None:
-        if clock.check_time_field_mismatch(epoch, timestamp):
+        time_field_mismatch = clock.check_time_field_mismatch(epoch, timestamp)
+        if time_field_mismatch:
             counters.time_field_mismatch += 1
             audit.append(
                 AuditEntry(
@@ -110,21 +143,27 @@ def normalize_batch(
         counters.filtered_batches += 1
         return NormalizeResult(epoch=epoch, filtered=True), counters
 
-    late = clock.is_late(float(epoch))
+    # Epoch remains the authority. When the timestamp agrees with it, retain
+    # its sub-second component because the real feed runs at ~500 ms cadence.
+    event_epoch = float(epoch)
+    if parsed_timestamp is not None and not time_field_mismatch:
+        event_epoch = parsed_timestamp
+
+    late = clock.is_late(event_epoch)
     if late:
         counters.late_batches += 1
-    clock.update_watermark(float(epoch))
+    clock.update_watermark(event_epoch)
 
     received_at = now_fn()
-    clock.record_skew_sample(received_at, float(epoch))
-    _, clock_anomaly = clock.compute_age(received_at, float(epoch))
+    clock.record_skew_sample(received_at, event_epoch)
+    _, clock_anomaly = clock.compute_age(received_at, event_epoch)
     if clock_anomaly:
         counters.clock_anomaly += 1
         audit.append(AuditEntry("clock_anomaly", {"epoch": epoch}))
 
-    cadence.observe(float(epoch))
+    cadence.observe(event_epoch)
 
-    event_time_iso = epoch_to_iso(epoch)
+    event_time_iso = epoch_to_iso(event_epoch)
     received_at_iso = epoch_to_iso(received_at)
 
     readings: list[Reading] = []
@@ -141,7 +180,7 @@ def normalize_batch(
         # §3.2: one readingId per device-batch ROW, shared by every metric on
         # that device in this batch — evidenceRefs disambiguate via
         # `{reading_id}#{metric}`. NOT one id per metric.
-        row_reading_id = _reading_id()
+        row_reading_id = _reading_id(batch, device, epoch)
 
         for metric, value in metrics.items():
             spec = get_spec(device_code, metric)

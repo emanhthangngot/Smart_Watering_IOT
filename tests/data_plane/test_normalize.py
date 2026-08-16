@@ -74,6 +74,31 @@ def test_healthy_batch_produces_nine_readings(config):
 
 
 @pytest.mark.data_plane
+def test_same_epoch_subsecond_snapshots_get_distinct_stable_ids(config):
+    first = copy.deepcopy(BASE_BATCH)
+    second = copy.deepcopy(BASE_BATCH)
+    first["timestamp"] = "2026-08-16T03:12:54.438Z"
+    second["timestamp"] = "2026-08-16T03:12:54.939Z"
+    first["epoch"] = second["epoch"] = 1786849974
+    second["devices"][0]["metrics"]["ph"] = 6.9
+
+    first_state = _fresh_state()
+    first_result, _ = normalize_batch(first, config, *first_state)
+    replay_state = _fresh_state()
+    replay_result, _ = normalize_batch(copy.deepcopy(first), config, *replay_state)
+    second_state = _fresh_state()
+    second_result, _ = normalize_batch(second, config, *second_state)
+
+    first_ids = {reading.reading_id for reading in first_result.readings}
+    replay_ids = {reading.reading_id for reading in replay_result.readings}
+    second_ids = {reading.reading_id for reading in second_result.readings}
+    assert first_ids == replay_ids
+    assert first_ids.isdisjoint(second_ids)
+    assert first_result.readings[0].event_time.endswith("54.438Z")
+    assert second_result.readings[0].event_time.endswith("54.939Z")
+
+
+@pytest.mark.data_plane
 def test_unknown_metric_counted_not_raised(config):
     batch = copy.deepcopy(BASE_BATCH)
     batch["devices"][0]["metrics"]["turbidity"] = 3.2
@@ -106,6 +131,19 @@ def test_missing_both_time_fields_drops_batch(config):
     assert result.dropped is True
     assert counters.dropped_batches == 1
     assert result.readings == []
+
+
+@pytest.mark.data_plane
+def test_invalid_timestamp_without_epoch_drops_batch_instead_of_raising(config):
+    batch = copy.deepcopy(BASE_BATCH)
+    del batch["epoch"]
+    batch["timestamp"] = 12345
+    clock, cadence, presence = _fresh_state()
+
+    result, counters = normalize_batch(batch, config, clock, cadence, presence)
+
+    assert result.dropped is True
+    assert counters.dropped_batches == 1
 
 
 @pytest.mark.data_plane

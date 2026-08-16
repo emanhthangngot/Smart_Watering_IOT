@@ -32,8 +32,10 @@ def test_generated_sql_has_readings_all_view_covering_every_metric():
 
 
 @pytest.mark.data_plane
-def test_generated_sql_has_ingest_batch_rpc_and_unique_constraint():
+def test_generated_sql_has_ingest_batch_rpc_and_stable_id_conflict_key():
     sql = generate()
     assert "create or replace function ingest_batch(payload jsonb)" in sql
-    assert sql.count("unique (team_code, epoch)") == len(DEVICES)
-    assert sql.count("on conflict (team_code, epoch) do nothing") == len(DEVICES)
+    assert "unique (team_code, epoch)" not in sql
+    assert sql.count("on conflict (id) do nothing") == len(DEVICES)
+    assert sql.count("(team_code, epoch desc)") == len(DEVICES)
+    assert "(payload->>'eventTime')::timestamptz" in sql
