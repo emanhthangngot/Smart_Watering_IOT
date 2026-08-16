@@ -13,21 +13,29 @@ from __future__ import annotations
 
 import importlib
 import pkgutil
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
 import api.routers as routers_pkg
+from api.runtime import runtime
 
-app = FastAPI(title="FarmOps AI")
 
-for _, module_name, _ in pkgutil.iter_modules(routers_pkg.__path__):
+@asynccontextmanager
+async def lifespan(app_instance: FastAPI):
+    del app_instance
+    await runtime.start()
+    try:
+        yield
+    finally:
+        await runtime.stop()
+
+
+app = FastAPI(title="FarmOps AI", lifespan=lifespan)
+
+for finder, module_name, is_package in pkgutil.iter_modules(routers_pkg.__path__):
+    del finder, is_package
     module = importlib.import_module(f"api.routers.{module_name}")
     router = getattr(module, "router", None)
     if router is not None:
         app.include_router(router)
-
-
-@app.get("/health")
-def health() -> dict:
-    """§11.3 — batch period, late_ratio, skew, uptime, outbox depth. Stub."""
-    return {"status": "stub"}
