@@ -2,11 +2,11 @@
 
 Design reference: plans/reports/plan.md §6.1 (assumption / plan record fields).
 
-Ownership: seeded here by dev, filled in by M1 (feat/data-plane) at gate G0.
-Once G0 freezes this file, changing a field requires bumping CONTRACT_VERSION
-and announcing on dev — see plans/260816-0957-farmops-delivery/phase-02-contract-lock.md.
+Ownership: frozen by M1 (feat/data-plane) at gate G0. Changing a field
+after freeze requires bumping CONTRACT_VERSION and announcing on dev — see
+plans/260816-0957-farmops-delivery/phase-02-contract-lock.md.
 
-STATUS: stub. Not yet frozen.
+STATUS: frozen at G0.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-CONTRACT_VERSION = "0.0.0-unfrozen"
+CONTRACT_VERSION = "1.0.0"
 
 
 @dataclass(frozen=True)
@@ -58,6 +58,8 @@ class Challenge:
     status: str
     reason: str
     evidence_refs: list[str] = field(default_factory=list)
+    requested_evidence: list[str] = field(default_factory=list)
+    requested_revision: str | None = None
 
 
 @dataclass
