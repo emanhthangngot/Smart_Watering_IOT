@@ -20,6 +20,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 import api.routers as routers_pkg
+from api.bootstrap import build_schedule_runner
 from api.runtime import runtime
 from api.service import service
 from config import Config
@@ -43,6 +44,7 @@ async def lifespan(app_instance: FastAPI):
         ingestion_status=worker.status if worker is not None else None,
     )
     runtime.configure_data_plane(worker)
+    runtime.configure_schedule_runner(build_schedule_runner(config, service))
     try:
         pool = await get_pool()
         await apply_live_ingestion_migration(pool)
@@ -57,6 +59,7 @@ async def lifespan(app_instance: FastAPI):
     finally:
         await runtime.stop()
         runtime.configure_data_plane(None)
+        runtime.configure_schedule_runner(None)
         service.configure_data_plane(None, mqtt_enabled=False)
         await close_pool()
 

@@ -66,6 +66,19 @@ class RuntimeCoordinator:
                 raise RuntimeError("runtime cannot be reconfigured while running")
             self.data_plane_runner = runner
 
+    def configure_schedule_runner(self, runner: ForeverRunner | None) -> None:
+        """Install or disable the schedule runner while the app is stopped.
+
+        Separate from `configure()` (which still requires startup_recovery
+        and retention_job together) because those two have no durable
+        adapter yet — see api/bootstrap.py for why. The schedule runner can
+        be wired on its own.
+        """
+        with self._lock:
+            if self._started:
+                raise RuntimeError("runtime cannot be reconfigured while running")
+            self.schedule_runner = runner
+
     async def start(self) -> None:
         with self._lock:
             if self._started:
