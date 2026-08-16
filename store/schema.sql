@@ -12,10 +12,9 @@ create table soil_01_readings (
   source_status text        not null,
   late          boolean     not null default false,
   soil_moisture   double precision,  -- %
-  temperature     double precision,  -- °C
-  unique (team_code, epoch)
+  temperature     double precision  -- °C
 );
-create index on soil_01_readings (epoch desc);
+create index on soil_01_readings (team_code, epoch desc);
 
 create table weather_01_readings (
   id            text primary key,
@@ -27,10 +26,9 @@ create table weather_01_readings (
   source_status text        not null,
   late          boolean     not null default false,
   temperature     double precision,  -- °C
-  humidity        double precision,  -- %
-  unique (team_code, epoch)
+  humidity        double precision  -- %
 );
-create index on weather_01_readings (epoch desc);
+create index on weather_01_readings (team_code, epoch desc);
 
 create table pump_01_readings (
   id            text primary key,
@@ -42,10 +40,9 @@ create table pump_01_readings (
   source_status text        not null,
   late          boolean     not null default false,
   flow_rate       double precision,  -- L/min
-  power           double precision,  -- W
-  unique (team_code, epoch)
+  power           double precision  -- W
 );
-create index on pump_01_readings (epoch desc);
+create index on pump_01_readings (team_code, epoch desc);
 
 create table ph_01_readings (
   id            text primary key,
@@ -56,10 +53,9 @@ create table ph_01_readings (
   scenario      text,
   source_status text        not null,
   late          boolean     not null default false,
-  ph              double precision,  -- pH
-  unique (team_code, epoch)
+  ph              double precision  -- pH
 );
-create index on ph_01_readings (epoch desc);
+create index on ph_01_readings (team_code, epoch desc);
 
 create table tank_01_readings (
   id            text primary key,
@@ -70,10 +66,9 @@ create table tank_01_readings (
   scenario      text,
   source_status text        not null,
   late          boolean     not null default false,
-  level           double precision,  -- %
-  unique (team_code, epoch)
+  level           double precision  -- %
 );
-create index on tank_01_readings (epoch desc);
+create index on tank_01_readings (team_code, epoch desc);
 
 create table sun_01_readings (
   id            text primary key,
@@ -84,10 +79,9 @@ create table sun_01_readings (
   scenario      text,
   source_status text        not null,
   late          boolean     not null default false,
-  lux             double precision,  -- lx
-  unique (team_code, epoch)
+  lux             double precision  -- lx
 );
-create index on sun_01_readings (epoch desc);
+create index on sun_01_readings (team_code, epoch desc);
 
 create view readings_all as
   select id, 'SOIL_01' as device, 'soil_moisture' as metric, soil_moisture as value, epoch, event_time, received_at, source_status, late, scenario
@@ -271,7 +265,10 @@ create table if not exists trust_snapshots (
 create or replace function ingest_batch(payload jsonb) returns void as $$
 declare
   v_epoch      bigint := (payload->>'epoch')::bigint;
-  v_event_time timestamptz := to_timestamp((payload->>'epoch')::bigint);
+  v_event_time timestamptz := coalesce(
+    (payload->>'eventTime')::timestamptz,
+    to_timestamp((payload->>'epoch')::bigint)
+  );
   v_team_code  text := payload->>'teamCode';
   v_scenario   text := payload->>'scenario';
   v_late       boolean := coalesce((payload->>'late')::boolean, false);
@@ -282,27 +279,27 @@ begin
       when 'SOIL_01' then
         insert into soil_01_readings (id, epoch, event_time, team_code, scenario, source_status, late, soil_moisture, temperature)
         values ((d->>'id'), v_epoch, v_event_time, v_team_code, v_scenario, (d->>'status'), v_late, (d->'metrics'->>'soil_moisture')::double precision, (d->'metrics'->>'temperature')::double precision)
-        on conflict (team_code, epoch) do nothing;
+        on conflict (id) do nothing;
       when 'WEATHER_01' then
         insert into weather_01_readings (id, epoch, event_time, team_code, scenario, source_status, late, temperature, humidity)
         values ((d->>'id'), v_epoch, v_event_time, v_team_code, v_scenario, (d->>'status'), v_late, (d->'metrics'->>'temperature')::double precision, (d->'metrics'->>'humidity')::double precision)
-        on conflict (team_code, epoch) do nothing;
+        on conflict (id) do nothing;
       when 'PUMP_01' then
         insert into pump_01_readings (id, epoch, event_time, team_code, scenario, source_status, late, flow_rate, power)
         values ((d->>'id'), v_epoch, v_event_time, v_team_code, v_scenario, (d->>'status'), v_late, (d->'metrics'->>'flow_rate')::double precision, (d->'metrics'->>'power')::double precision)
-        on conflict (team_code, epoch) do nothing;
+        on conflict (id) do nothing;
       when 'PH_01' then
         insert into ph_01_readings (id, epoch, event_time, team_code, scenario, source_status, late, ph)
         values ((d->>'id'), v_epoch, v_event_time, v_team_code, v_scenario, (d->>'status'), v_late, (d->'metrics'->>'ph')::double precision)
-        on conflict (team_code, epoch) do nothing;
+        on conflict (id) do nothing;
       when 'TANK_01' then
         insert into tank_01_readings (id, epoch, event_time, team_code, scenario, source_status, late, level)
         values ((d->>'id'), v_epoch, v_event_time, v_team_code, v_scenario, (d->>'status'), v_late, (d->'metrics'->>'level')::double precision)
-        on conflict (team_code, epoch) do nothing;
+        on conflict (id) do nothing;
       when 'SUN_01' then
         insert into sun_01_readings (id, epoch, event_time, team_code, scenario, source_status, late, lux)
         values ((d->>'id'), v_epoch, v_event_time, v_team_code, v_scenario, (d->>'status'), v_late, (d->'metrics'->>'lux')::double precision)
-        on conflict (team_code, epoch) do nothing;
+        on conflict (id) do nothing;
       else
         -- unknown deviceCode: ignored here, counted upstream by ingest/normalize.py
         null;

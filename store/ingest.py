@@ -68,6 +68,7 @@ async def write_readings(
 
     payload = {
         "epoch": epoch,
+        "eventTime": readings[0].event_time,
         "teamCode": team_code,
         "scenario": scenario,
         "late": late,

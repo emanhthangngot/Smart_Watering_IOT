@@ -66,3 +66,13 @@ makes replay idempotent.
 Supabase pooler port 6543 may be blocked at the venue network (§18 open
 question 8). Mitigation already in design: fall back to port 5432 (session
 mode, re-enable prepared statements) — implement both paths behind config.
+
+## 2026-08-16 live-feed correction
+
+The captured FARM feed publishes about every 500 ms while `epoch` has only
+whole-second precision. Therefore `(team_code, epoch)` cannot be the unique
+key: it would discard nearly half of valid snapshots. Each device-row now has
+a deterministic content-derived primary key, RPC replay conflicts on `id`,
+and `(team_code, epoch desc)` remains a non-unique query index. A timestamp
+that agrees with the authoritative epoch contributes sub-second event-time
+precision; a mismatched timestamp is still audited and ignored.

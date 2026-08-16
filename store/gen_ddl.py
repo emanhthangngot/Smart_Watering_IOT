@@ -35,18 +35,19 @@ def _table_name(device_code: str) -> str:
 
 
 def _gen_sensor_table(device_code: str) -> str:
+    metric_specs = metrics_for_device(device_code)
     metric_columns = "\n".join(
-        f"  {spec.metric:<15} {_PG_COLUMN_TYPE},  -- {spec.unit}"
-        for spec in metrics_for_device(device_code)
+        f"  {spec.metric:<15} {_PG_COLUMN_TYPE}"
+        f"{',' if index < len(metric_specs) - 1 else ''}  -- {spec.unit}"
+        for index, spec in enumerate(metric_specs)
     )
     table = _table_name(device_code)
     return (
         f"create table {table} (\n"
         f"{_SHARED_COLUMNS},\n"
         f"{metric_columns}\n"
-        f"  unique (team_code, epoch)\n"
         f");\n"
-        f"create index on {table} (epoch desc);\n"
+        f"create index on {table} (team_code, epoch desc);\n"
     )
 
 
@@ -85,8 +86,7 @@ def _gen_ingest_batch_rpc() -> str:
         # device-batch row (§3.2) and computes `late` from the watermark;
         # this RPC must not mint a second, disagreeing id.
         values = (
-            "(d->>'id'), v_epoch, v_event_time, v_team_code, v_scenario, "
-            "(d->>'status'), v_late"
+            "(d->>'id'), v_epoch, v_event_time, v_team_code, v_scenario, (d->>'status'), v_late"
         )
         if metric_values:
             values = f"{values}, {metric_values}"
@@ -94,14 +94,17 @@ def _gen_ingest_batch_rpc() -> str:
             f"      when '{device_code}' then\n"
             f"        insert into {table} ({insert_cols})\n"
             f"        values ({values})\n"
-            f"        on conflict (team_code, epoch) do nothing;"
+            f"        on conflict (id) do nothing;"
         )
     case_body = "\n".join(branches)
     return f"""\
 create or replace function ingest_batch(payload jsonb) returns void as $$
 declare
   v_epoch      bigint := (payload->>'epoch')::bigint;
-  v_event_time timestamptz := to_timestamp((payload->>'epoch')::bigint);
+  v_event_time timestamptz := coalesce(
+    (payload->>'eventTime')::timestamptz,
+    to_timestamp((payload->>'epoch')::bigint)
+  );
   v_team_code  text := payload->>'teamCode';
   v_scenario   text := payload->>'scenario';
   v_late       boolean := coalesce((payload->>'late')::boolean, false);
