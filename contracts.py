@@ -6,15 +6,23 @@ Ownership: frozen by M1 (feat/data-plane) at gate G0. Changing a field
 after freeze requires bumping CONTRACT_VERSION and announcing on dev — see
 plans/260816-0957-farmops-delivery/phase-02-contract-lock.md.
 
-STATUS: frozen at G0.
+STATUS: frozen at G0. CONTRACT_VERSION bumped to 1.1.0 (additive only —
+PlanRevision, PlanStatus, the canonical serializer, and the revision-hash
+algorithm were added; no existing field was renamed or removed) to close
+coordination gate C0 for M3 (feat/agents). See
+plans/260816-0957-agents/plan.md §Coordination Ledger.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import hashlib
+import json
+import re
+from dataclasses import asdict, dataclass, field, is_dataclass
+from enum import StrEnum
 from typing import Any, Literal
 
-CONTRACT_VERSION = "1.0.0"
+CONTRACT_VERSION = "1.1.0"
 
 
 @dataclass(frozen=True)
@@ -110,3 +118,107 @@ class ToolPermission:
     min_tier: Literal["AUTO", "PROPOSE", "INVESTIGATE"]
     approval_required: bool
     idempotency_key_formula: str
+
+
+class PlanStatus(StrEnum):
+    """Plan revision lifecycle. Values match the strings already in use
+    across api/service.py, api/recovery.py, and schedule/runner.py; this
+    enum makes that vocabulary a single frozen source instead of scattered
+    string literals."""
+
+    PROPOSED = "PROPOSED"
+    APPROVED = "APPROVED"
+    EXECUTING = "EXECUTING"
+    SUSPENDED = "SUSPENDED"
+    NEEDS_REPLAN = "NEEDS_REPLAN"
+    EXPIRED = "EXPIRED"
+    REJECTED = "REJECTED"
+    DONE = "DONE"
+    CANCELLED = "CANCELLED"
+
+
+@dataclass
+class PlanRevision:
+    """§6.1 plan revision record; mirrors store/schema.sql plan_revisions.
+
+    Field order and names track the DB columns 1:1 so a row can round-trip
+    through ``asdict()``/``**row`` without a translation layer.
+    """
+
+    plan_revision_id: str
+    plan_lineage_id: str
+    version: int
+    status: PlanStatus | str
+    created_from_state_version: int
+    revision_of_plan_revision_id: str | None = None
+    goal: dict[str, Any] | None = None
+    evidence_refs: list[str] = field(default_factory=list)
+    constraints: dict[str, Any] | None = None
+    assumptions: list[str] = field(default_factory=list)
+    actions: list[dict[str, Any]] = field(default_factory=list)
+    expected_outcomes: list[dict[str, Any]] = field(default_factory=list)
+    water_budget: dict[str, Any] | None = None
+    confidence: dict[str, Any] | None = None
+    requires_approval: bool = False
+    challenges: list[str] = field(default_factory=list)
+    decision_log: list[dict[str, Any]] = field(default_factory=list)
+
+
+_CAMEL_BOUNDARY = re.compile(r"_([a-z0-9])")
+_SNAKE_BOUNDARY = re.compile(r"(?<!^)(?=[A-Z])")
+
+
+def to_camel_case(value: Any) -> Any:
+    """Recursively convert dict/list snake_case keys to camelCase. Non-dict/
+    list leaves pass through unchanged; this is the wire-format direction."""
+    if isinstance(value, dict):
+        return {
+            _CAMEL_BOUNDARY.sub(lambda m: m.group(1).upper(), key): to_camel_case(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [to_camel_case(item) for item in value]
+    return value
+
+
+def to_snake_case(value: Any) -> Any:
+    """Recursively convert dict/list camelCase keys to snake_case. Inverse
+    of ``to_camel_case``; this is the storage/Python-attribute direction."""
+    if isinstance(value, dict):
+        return {
+            _SNAKE_BOUNDARY.sub("_", key).lower(): to_snake_case(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [to_snake_case(item) for item in value]
+    return value
+
+
+REVISION_HASH_ALGORITHM_VERSION = 1
+
+# Fields excluded from the hash because they are set after the content that
+# matters to an approver already exists (server-assigned identity/audit
+# fields, not plan content).
+_REVISION_HASH_EXCLUDED_FIELDS = frozenset({"plan_revision_id", "created_at"})
+
+
+def compute_revision_hash(plan_revision: PlanRevision | dict[str, Any]) -> str:
+    """Deterministic, versioned hash of a plan revision's content.
+
+    An approval binds to this hash (contracts.py ``Approval.revision_hash``);
+    changing any hashed field after approval must produce a different hash so
+    a stale approval can never be replayed against revised plan content.
+    """
+    payload = asdict(plan_revision) if is_dataclass(plan_revision) else dict(plan_revision)
+    hashed = {
+        key: value for key, value in payload.items() if key not in _REVISION_HASH_EXCLUDED_FIELDS
+    }
+    canonical = json.dumps(
+        to_camel_case(hashed),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        default=str,
+    )
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    return f"rh_{REVISION_HASH_ALGORITHM_VERSION}_{digest}"
