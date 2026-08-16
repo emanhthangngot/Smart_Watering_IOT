@@ -10,6 +10,7 @@ import { VerificationPanels } from "../components/VerificationPanels";
 import { EmptyBlock, Panel, ResourceState, StatusBadge } from "../components/ui";
 import { usePollingResource } from "../hooks/usePollingResource";
 import { humanize } from "../lib/format";
+import { describeTierOutcome } from "../domain/planPolicy";
 
 function PlanDetailView({ revisionId }: { revisionId: string }) {
   const { api, farmState, refreshAll } = useOperations();
@@ -59,6 +60,14 @@ function PlanDetailView({ revisionId }: { revisionId: string }) {
               <div><dt>Autonomy tier</dt><dd><StatusBadge status={plan.confidence.tier} /></dd></div>
               <div><dt>World State nguồn</dt><dd className="numeric">#{plan.createdFromStateVersion ?? "N/A"}</dd></div>
             </dl>
+            {(() => {
+              const notice = describeTierOutcome(plan.confidence.tier);
+              return notice ? (
+                <p className={`tier-notice tier-notice--${notice.tone}`} role="status">
+                  {notice.message}
+                </p>
+              ) : null;
+            })()}
           </Panel>
           <Panel title="Ngân sách nước" description="Chỉ dùng phần trăm tank và phút bơm khi chưa có dung tích." className="water-budget">
             <span className="water-budget__icon" aria-hidden="true"><Drop size={25} weight="fill" /></span>

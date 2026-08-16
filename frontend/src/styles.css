@@ -32,6 +32,13 @@
   --shadow: 0 16px 44px rgb(30 47 39 / 0.12);
   --radius-control: 10px;
   --radius-panel: 14px;
+  /* Categorical chart series — dataviz skill reference palette, slots 1/2/3
+     (blue/orange/aqua). Validated all-pairs at this order: worst adjacent
+     CVD ΔE 9.2, normal-vision ΔE 24.0 (light). Never reassign a slot to a
+     different metric identity across charts. */
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
 }
 
 :root[data-theme="dark"] {
@@ -58,6 +65,11 @@
   --info: #82bad5;
   --info-soft: #1b3440;
   --shadow: 0 20px 60px rgb(3 8 5 / 0.42);
+  /* Dark-surface steps for the same three categorical slots — validated
+     all-pairs against the dark chart surface, not an automatic flip. */
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
 }
 
 * {
@@ -557,6 +569,28 @@ main {
   gap: 14px;
 }
 
+.live-chart__legend { display: flex; gap: 12px; list-style: none; margin: 0; padding: 0; }
+.live-chart__legend li { display: flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: 0.76rem; }
+.live-chart__legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; }
+.live-chart__body { display: grid; gap: 10px; }
+.live-chart__svg { width: 100%; height: auto; overflow: visible; }
+.live-chart__grid { stroke: var(--line); stroke-width: 1; opacity: 0.6; }
+/* No CSS transition on circle cx/cy or path d: cx/cy tweens cleanly (two
+   scalars) but d does not — every tick's whole coordinate string differs
+   (sliding time window), so the browser has no reliable point-for-point
+   correspondence to interpolate against. Transitioning only the circle
+   made it visibly drift ahead of the line it's supposed to sit on. Redraw
+   both atomically in the same tick instead — an honest 1s-cadence step,
+   not a fake smooth glide that comes apart between marks. */
+.live-chart__crosshair { stroke: var(--line-strong); stroke-width: 1; stroke-dasharray: 3 3; }
+.live-chart__warmup { color: var(--text-muted); font-size: 0.82rem; }
+.live-chart__readout { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; padding-top: 8px; border-top: 1px solid var(--line); }
+.live-chart__readout-item { display: flex; align-items: center; gap: 6px; font-size: 0.78rem; }
+.live-chart__readout-item i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.live-chart__readout-item span { color: var(--text-muted); }
+.live-chart__readout-item strong { color: var(--text); font-variant-numeric: tabular-nums; }
+.live-chart__readout-time { margin-left: auto; color: var(--text-muted); font-size: 0.72rem; font-variant-numeric: tabular-nums; }
+
 .device-panel { padding: 18px; }
 .device-panel__topline { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 14px; }
 .device-panel__topline > div { display: flex; align-items: center; gap: 9px; min-width: 0; }
@@ -658,6 +692,10 @@ main {
 .verification-record dt { color: var(--text-muted); font-size: 0.66rem; }
 .outcome-list dd,
 .verification-record dd { margin: 0; font-size: 0.76rem; }
+
+.tier-notice { margin-top: 12px; padding: 10px 12px; border-radius: 10px; font-size: 0.8rem; line-height: 1.4; }
+.tier-notice--fast { color: var(--success); background: var(--success-soft); }
+.tier-notice--restricted { color: var(--danger); background: var(--danger-soft); }
 
 .approval-panel { border-color: var(--accent); }
 .revision-hash { display: grid; gap: 6px; margin-bottom: 13px; padding: 12px; border-radius: 10px; background: var(--surface-muted); }

@@ -246,9 +246,8 @@ main { width: 100%; max-width: 1540px; margin: 0; padding: 24px 28px 48px; }
 .field > span { color: var(--text-muted); font-size: 0.7rem; font-weight: 720; }.field input, .field select, .field textarea { border-color: var(--line-strong); background: var(--surface-raised); }.field textarea { min-height: 76px; }
 .request-success { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 10px; border-radius: 9px; color: var(--success); background: var(--success-soft); font-size: 0.76rem; }
 
-.device-section, .monitoring-section { padding: 18px; border: 1px solid var(--line); border-radius: var(--radius-panel); background: var(--surface); box-shadow: 0 8px 22px rgb(30 61 43 / 0.04); scroll-margin-top: 90px; }
 .device-grid { grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 12px; }.device-panel { padding: 16px; box-shadow: none; }.device-panel:hover { transform: translateY(-1px); }.device-panel__meta { font-size: 0.7rem; }.reason-list { border: 1px solid var(--line); background: var(--surface-muted); }
-.monitoring-section .panel { padding: 16px; box-shadow: none; }
+.monitoring-chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
 
 .page-heading { padding: 2px 0 6px; }.page-heading h1 { font-size: clamp(1.65rem, 3.2vw, 2.45rem); }.page-heading__status { align-self: center; }.plan-summary-grid .panel, .plan-record-grid .panel { min-height: 0; }
 .task-record, .timeline__record, .challenge-list article, .action-list article, .outcome-list article, .verification-record { box-shadow: none; }
@@ -275,7 +274,7 @@ main { width: 100%; max-width: 1540px; margin: 0; padding: 24px 28px 48px; }
   .attention-panel, .active-plan-card { min-height: 0; }.attention-panel__action, .active-plan-card__action { margin-top: 13px; }.agent-activity__track { gap: 7px; }.agent-activity__track li:not(:last-child)::after { right: -5px; width: 9px; }.agent-activity__track p { display: none; }
   .assumptions-preview ul { grid-template-columns: 1fr; }.command-verification { padding: 14px; }.verification-grid { grid-template-columns: 1fr; }.verification-panel { padding: 14px; }
   .request-card { grid-template-columns: 1fr; gap: 16px; padding: 16px; }.request-form { grid-template-columns: 1fr; }.request-form .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }.request-form > .button { grid-column: 1; width: 100%; }.request-form > .field { grid-column: 1; }.request-form .form-hint, .request-form .form-error, .request-form .request-success { grid-column: 1; }.request-success { align-items: stretch; flex-direction: column; }.request-success .button { width: 100%; }
-  .device-section, .monitoring-section { padding: 14px; }.device-grid { grid-template-columns: 1fr; }.section-heading { align-items: flex-start; flex-direction: column; gap: 6px; }.health-grid { grid-template-columns: 1fr; }
+  .device-grid, .monitoring-chart-grid { grid-template-columns: 1fr; }.section-heading { align-items: flex-start; flex-direction: column; gap: 6px; }.health-grid { grid-template-columns: 1fr; }
   .page-heading { display: grid; gap: 12px; }.page-heading__status { justify-items: start; }.plan-summary-grid, .plan-record-grid, .verification-grid, .assumption-grid, .task-grid { grid-template-columns: 1fr; }.record-grid, .outcome-list dl, .verification-record dl, .evidence-lineage dl { grid-template-columns: 1fr; }.trace-search { grid-template-columns: 1fr; }.trace-search .button, .approval-actions .button { width: 100%; }.approval-actions { flex-direction: column-reverse; }
 }
 

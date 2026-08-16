@@ -13,7 +13,7 @@ import {
   Sun,
   X,
 } from "@phosphor-icons/react";
-import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { NotificationBanner } from "../components/NotificationBanner";
 import { StatusBadge } from "../components/ui";
 import { useOperations } from "./useOperations";
@@ -67,8 +67,8 @@ const navigation = [
   { to: "/", label: "Tổng quan", icon: SquaresFour, match: "overview" },
   { to: "/plan", label: "Kế hoạch", icon: ClipboardText, match: "plan" },
   { to: "/inspection-tasks", label: "Nhiệm vụ", icon: ListChecks, match: "inspection-tasks" },
-  { to: "/#devices", label: "Thiết bị", icon: Cpu, match: "devices" },
-  { to: "/#monitoring", label: "Giám sát", icon: ChartLine, match: "monitoring" },
+  { to: "/devices", label: "Thiết bị", icon: Cpu, match: "devices" },
+  { to: "/monitoring", label: "Giám sát", icon: ChartLine, match: "monitoring" },
   { to: "/trace", label: "Lịch sử & Trace", icon: GitBranch, match: "trace" },
 ] as const;
 
@@ -82,21 +82,13 @@ export function AppShell() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const unreadCount = (tasks.data ?? []).filter((task) => task.status === "unread").length;
   const isActive = (match: string) => {
-    if (match === "overview") return location.pathname === "/" && !location.hash;
-    if (match === "plan") return location.pathname.startsWith("/plan");
-    if (match === "devices") return location.pathname === "/" && location.hash === "#devices";
-    if (match === "monitoring") return location.pathname === "/" && location.hash === "#monitoring";
+    if (match === "overview") return location.pathname === "/";
     return location.pathname.startsWith(`/${match}`);
   };
 
   const navigationLinks = (items: readonly typeof navigation[number][]) => items.map(({ to, label, icon: Icon, match }) => {
     const content = <><span className="nav-icon"><Icon size={20} aria-hidden="true" />{match === "inspection-tasks" && unreadCount > 0 ? <b aria-label={`${unreadCount} nhiệm vụ chưa đọc`}>{unreadCount}</b> : null}</span><span>{label}</span></>;
     const active = isActive(match);
-    // Hash links are in-page jumps, not routes. NavLink treats them as "/"
-    // and would mark them active together with the overview route.
-    if (match === "devices" || match === "monitoring") {
-      return <Link key={to} to={to} className={active ? "active" : ""} aria-current={active ? "page" : undefined}>{content}</Link>;
-    }
     return <NavLink key={to} to={to} className={active ? "active" : ""} aria-current={active ? "page" : undefined}>{content}</NavLink>;
   });
 

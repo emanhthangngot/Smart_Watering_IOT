@@ -12,6 +12,13 @@ export function formatDateTime(value?: string): string {
   }).format(date);
 }
 
+export function formatClockTime(value?: string | Date): string {
+  if (!value) return "";
+  const date = typeof value === "string" ? new Date(value) : value;
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("vi-VN", { hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(date);
+}
+
 export function formatDuration(seconds?: number): string {
   if (seconds === undefined) return "Chưa có dữ liệu";
   if (seconds < 60) return `${seconds.toFixed(seconds < 10 ? 1 : 0)} giây`;

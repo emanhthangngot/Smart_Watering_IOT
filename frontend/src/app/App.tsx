@@ -1,4 +1,6 @@
 import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { DevicesPage } from "../pages/DevicesPage";
+import { MonitoringPage } from "../pages/MonitoringPage";
 import { NotFoundPage } from "../pages/NotFoundPage";
 import { OverviewPage } from "../pages/OverviewPage";
 import { PlanPage } from "../pages/PlanPage";
@@ -19,6 +21,8 @@ export function App() {
               <Route path="plan" element={<PlanPage />} />
               <Route path="plans/:revisionId" element={<PlanPage />} />
               <Route path="inspection-tasks" element={<TasksPage />} />
+              <Route path="devices" element={<DevicesPage />} />
+              <Route path="monitoring" element={<MonitoringPage />} />
               <Route path="trace" element={<TracePage />} />
               <Route path="trace/:traceId" element={<TracePage />} />
               <Route path="*" element={<NotFoundPage />} />
