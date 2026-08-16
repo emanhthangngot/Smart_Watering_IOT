@@ -1,16 +1,39 @@
 {
-  "timestamp": "2026-07-18T07:30:01.000Z",
-  "epoch": 1784369401,
-  "environment": "HOME",
-  "teamCode": "HOME_T1",
+  "timestamp": "2026-08-16T02:36:56.448Z",
+  "epoch": 1786847816,
+  "environment": "FARM",
+  "scenario": "NORMAL",
   "devices": [
     {
-      "deviceCode": "AC_01",
+      "deviceCode": "PH_01",
       "status": "ok",
-      "metrics": {
-        "power": 1160.4,
-        "temperature": 24.7
-      }
+      "metrics": { "ph": 10 }
+    },
+    {
+      "deviceCode": "PUMP_01",
+      "status": "ok",
+      "metrics": { "flow_rate": 13.9, "power": 646.3 }
+    },
+    {
+      "deviceCode": "SOIL_01",
+      "status": "ok",
+      "metrics": { "soil_moisture": 36, "temperature": 26.1 }
+    },
+    {
+      "deviceCode": "SUN_01",
+      "status": "ok",
+      "metrics": { "lux": 49833.3 }
+    },
+    {
+      "deviceCode": "TANK_01",
+      "status": "ok",
+      "metrics": { "level": 59.8 }
+    },
+    {
+      "deviceCode": "WEATHER_01",
+      "status": "ok",
+      "metrics": { "temperature": 24.3, "humidity": 66.9 }
     }
-  ]
+  ],
+  "teamCode": "VAMOS"
 }
