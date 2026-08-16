@@ -1,0 +1,2 @@
+# M2 feat/trust-engine — owner-specific dependencies. See requirements/base.txt for shared pins.
+pytest

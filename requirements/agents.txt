@@ -1,0 +1,1 @@
+# M3 feat/agents — owner-specific dependencies (LLM client, etc). See requirements/base.txt for shared pins.

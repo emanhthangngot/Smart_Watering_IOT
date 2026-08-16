@@ -1,0 +1,3 @@
+# M1 feat/data-plane — owner-specific dependencies. See requirements/base.txt for shared pins.
+paho-mqtt>=2.1
+

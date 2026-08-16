@@ -1,0 +1,8 @@
+# M4 feat/tools-runner-api — owner-specific dependencies. See requirements/base.txt for shared pins.
+httpx2
+# Sync driver for PostgresScheduleRepository (store/schedule_repository.py):
+# ScheduleRunner.tick() and the ScheduleRepository Protocol are synchronous,
+# called from inside an already-running asyncio loop (run_forever), so the
+# async asyncpg pool (store/db.py) cannot be awaited here without a second
+# event loop. psycopg2 keeps the durable adapter a plain blocking call.
+psycopg2-binary

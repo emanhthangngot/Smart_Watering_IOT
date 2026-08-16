@@ -1,0 +1,124 @@
+{
+  "fixture_id": "F3",
+  "name": "bundle_broken",
+  "description": "SOIL_01 both metrics OFFLINE (hard-fail, required metric) + tank_drain_no_pump soft rule fired (-0.30). \u00a74.4 F3: DCS raw 0.69, capped to 0.40, INVESTIGATE.",
+  "scope": "irrigation_plan",
+  "wsum": 13,
+  "now_epoch": 1786850000,
+  "observed_batch_period_s": 100.0,
+  "readings": [
+    {
+      "device": "SOIL_01",
+      "metric": "soil_moisture",
+      "value": 36.0,
+      "unit": "%",
+      "source_status": "ok",
+      "reading_status": "OFFLINE",
+      "age_s": null,
+      "ttl_batches": 3,
+      "ttl_s": 300.0,
+      "freshness": 0.0,
+      "weight": 3,
+      "required": true
+    },
+    {
+      "device": "SOIL_01",
+      "metric": "temperature",
+      "value": 26.1,
+      "unit": "\u00b0C",
+      "source_status": "ok",
+      "reading_status": "OFFLINE",
+      "age_s": null,
+      "ttl_batches": 3,
+      "ttl_s": 300.0,
+      "freshness": 0.0,
+      "weight": 1,
+      "required": false
+    },
+    {
+      "device": "WEATHER_01",
+      "metric": "temperature",
+      "value": 24.3,
+      "unit": "\u00b0C",
+      "source_status": "ok",
+      "reading_status": "FRESH",
+      "age_s": 0,
+      "ttl_batches": 6,
+      "ttl_s": 600.0,
+      "freshness": 1.0,
+      "weight": 1,
+      "required": false
+    },
+    {
+      "device": "WEATHER_01",
+      "metric": "humidity",
+      "value": 66.9,
+      "unit": "%",
+      "source_status": "ok",
+      "reading_status": "FRESH",
+      "age_s": 0,
+      "ttl_batches": 6,
+      "ttl_s": 600.0,
+      "freshness": 1.0,
+      "weight": 2,
+      "required": false
+    },
+    {
+      "device": "PUMP_01",
+      "metric": "flow_rate",
+      "value": 13.9,
+      "unit": "L/min",
+      "source_status": "ok",
+      "reading_status": "FRESH",
+      "age_s": 0,
+      "ttl_batches": 2,
+      "ttl_s": 200.0,
+      "freshness": 1.0,
+      "weight": 2,
+      "required": false
+    },
+    {
+      "device": "TANK_01",
+      "metric": "level",
+      "value": 59.8,
+      "unit": "%",
+      "source_status": "ok",
+      "reading_status": "FRESH",
+      "age_s": 0,
+      "ttl_batches": 3,
+      "ttl_s": 300.0,
+      "freshness": 1.0,
+      "weight": 3,
+      "required": true
+    },
+    {
+      "device": "SUN_01",
+      "metric": "lux",
+      "value": 49833.3,
+      "unit": "lx",
+      "source_status": "ok",
+      "reading_status": "FRESH",
+      "age_s": 0,
+      "ttl_batches": 3,
+      "ttl_s": 300.0,
+      "freshness": 1.0,
+      "weight": 1,
+      "required": false
+    }
+  ],
+  "rules_fired": [
+    "tank_drain_no_pump"
+  ],
+  "expected": {
+    "F": 0.6923,
+    "C": 0.6923,
+    "K": 0.7,
+    "dcs_raw": 0.6938,
+    "cap_applied": 0.4,
+    "dcs": 0.4,
+    "tier": "INVESTIGATE",
+    "rules_fired": [
+      "tank_drain_no_pump"
+    ]
+  }
+}

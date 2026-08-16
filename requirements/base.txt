@@ -1,0 +1,6 @@
+# dev-owned. Shared pins only. Owner-specific deps go in requirements/<role>.txt.
+fastapi
+uvicorn[standard]
+asyncpg
+python-dotenv
+pydantic
