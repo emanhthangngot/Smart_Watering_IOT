@@ -268,3 +268,29 @@ def test_snapshot_record_matches_frozen_database_schema() -> None:
         "dcs_policy_version": 1,
         "farm_state_version": 42,
     }
+
+
+def test_score_scope_binds_source_state_version_and_evaluation_id():
+    snapshot = score_scope(
+        {"TANK_01.level": {"value": 59.8, "state": "FRESH"}},
+        {},
+        "irrigation_plan",
+        source_state_version=42,
+        evaluation_id="ev_1",
+        evaluation_time="2026-08-16T00:00:00Z",
+    )
+    assert snapshot.source_state_version == 42
+    assert snapshot.evaluation_id == "ev_1"
+    assert snapshot.evaluation_time == "2026-08-16T00:00:00Z"
+
+
+def test_score_scope_defaults_state_version_to_none_for_existing_callers():
+    snapshot = score_scope({}, {}, "irrigation_plan")
+    assert snapshot.source_state_version is None
+
+
+def test_divergence_binds_source_state_version():
+    outcome = ExpectedOutcome("TANK_01.level", "at_least", 50, 1, "5m", "TANK_01.level", "a1")
+    readings = {"TANK_01": {"level": [60.0]}}
+    divergence = evaluate(outcome, readings, source_state_version=42)
+    assert divergence.source_state_version == 42

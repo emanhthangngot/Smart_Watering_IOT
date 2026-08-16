@@ -27,6 +27,9 @@ class ScoreSnapshot:
     rules_fired: tuple[str, ...]
     blocked_required_metrics: tuple[str, ...]
     dcsPolicyVersion: int = DCS_POLICY_VERSION
+    source_state_version: int | None = None
+    evaluation_id: str | None = None
+    evaluation_time: str | None = None
 
     def payload(self) -> dict[str, Any]:
         result = asdict(self)
@@ -116,8 +119,17 @@ def score_scope(
     ages: Mapping[str, float] | None = None,
     ttls: Mapping[str, float] | None = None,
     fired_rules: Iterable[str] = (),
+    source_state_version: int | None = None,
+    evaluation_id: str | None = None,
+    evaluation_time: str | None = None,
 ) -> ScoreSnapshot:
-    """Score one scope against M1's frozen registry unless specs are supplied."""
+    """Score one scope against M1's frozen registry unless specs are supplied.
+
+    ``source_state_version``/``evaluation_id``/``evaluation_time`` bind the
+    resulting verdict to the world-state snapshot and evaluation run it was
+    computed from (coordination gate C2); all three are optional so existing
+    positional callers keep working unchanged.
+    """
     if specs is None:
         from registry.specs import SPECS
 
@@ -126,7 +138,19 @@ def score_scope(
     prepared, hard_fired = apply_hard_fails(bundle, windows)
     total_weight = sum(weight for weight, _ in metrics.values())
     if total_weight <= 0:
-        return ScoreSnapshot(scope, 0.0, 0.0, 0.0, 0.0, 0.40, hard_fired, ())
+        return ScoreSnapshot(
+            scope,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.40,
+            hard_fired,
+            (),
+            source_state_version=source_state_version,
+            evaluation_id=evaluation_id,
+            evaluation_time=evaluation_time,
+        )
     ages, ttls = ages or {}, ttls or {}
     fresh_total = complete_total = 0.0
     required_unusable = False
@@ -198,6 +222,9 @@ def score_scope(
         cap,
         tuple(sorted(set(hard_fired + tuple(supplied_hard) + soft_fired))),
         tuple(sorted(blocked_required)),
+        source_state_version=source_state_version,
+        evaluation_id=evaluation_id,
+        evaluation_time=evaluation_time,
     )
 
 
@@ -228,6 +255,9 @@ def score_readings(
     fired_rules: Iterable[str] = (),
     ages: Mapping[str, float] | None = None,
     ttls: Mapping[str, float] | None = None,
+    source_state_version: int | None = None,
+    evaluation_id: str | None = None,
+    evaluation_time: str | None = None,
 ) -> ScoreSnapshot:
     """Score normalized readings or an M1 fixture without copying registry data."""
     readings = tuple(readings)
@@ -242,4 +272,7 @@ def score_readings(
         fired_rules=declared_rules,
         ages=ages,
         ttls=ttls,
+        source_state_version=source_state_version,
+        evaluation_id=evaluation_id,
+        evaluation_time=evaluation_time,
     )

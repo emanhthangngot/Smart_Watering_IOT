@@ -17,6 +17,7 @@ class Divergence:
     assumptionId: str
     delta: float | None
     trajectory: tuple[float, ...]
+    source_state_version: int | None = None
 
     @property
     def affectedAssumptionId(self) -> str:
@@ -24,8 +25,15 @@ class Divergence:
         return self.assumptionId
 
 
-def evaluate(expected_outcome: Any, readings: Any) -> Divergence:
-    """Evaluate one ExpectedOutcome while preserving its causal assumption ID."""
+def evaluate(
+    expected_outcome: Any, readings: Any, *, source_state_version: int | None = None
+) -> Divergence:
+    """Evaluate one ExpectedOutcome while preserving its causal assumption ID.
+
+    ``source_state_version`` binds the resulting Divergence to the world-state
+    snapshot it was evaluated against (coordination gate C2); optional so
+    existing callers keep working unchanged.
+    """
     metric = field(expected_outcome, "metric")
     predicate = field(expected_outcome, "predicate", "at_least")
     threshold = field(expected_outcome, "threshold")
@@ -48,6 +56,7 @@ def evaluate(expected_outcome: Any, readings: Any) -> Divergence:
             assumption_id,
             None,
             trajectory,
+            source_state_version=source_state_version,
         )
     threshold, tolerance = float(threshold), float(tolerance or 0)
     if predicate in {"at_least", ">=", "min"}:
@@ -60,14 +69,28 @@ def evaluate(expected_outcome: Any, readings: Any) -> Divergence:
         observed = series[-1] - series[0] if len(series) >= 2 else None
         if observed is None:
             return Divergence(
-                str(metric), threshold, None, "INCONCLUSIVE", assumption_id, None, trajectory
+                str(metric),
+                threshold,
+                None,
+                "INCONCLUSIVE",
+                assumption_id,
+                None,
+                trajectory,
+                source_state_version=source_state_version,
             )
         passed = observed >= threshold - tolerance
     elif predicate in {"decrease", "delta_at_most"}:
         observed = series[-1] - series[0] if len(series) >= 2 else None
         if observed is None:
             return Divergence(
-                str(metric), threshold, None, "INCONCLUSIVE", assumption_id, None, trajectory
+                str(metric),
+                threshold,
+                None,
+                "INCONCLUSIVE",
+                assumption_id,
+                None,
+                trajectory,
+                source_state_version=source_state_version,
             )
         passed = observed <= threshold + tolerance
     else:
@@ -81,4 +104,5 @@ def evaluate(expected_outcome: Any, readings: Any) -> Divergence:
         assumption_id,
         observed - threshold,
         trajectory,
+        source_state_version=source_state_version,
     )
