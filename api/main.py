@@ -20,6 +20,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 import api.routers as routers_pkg
+import api.wiring as wiring
 from api.runtime import runtime
 from api.service import service
 from config import Config
@@ -51,10 +52,18 @@ async def lifespan(app_instance: FastAPI):
         # The worker retries its whole lifecycle and applies the migration
         # before consuming once PostgreSQL becomes reachable.
         logger.warning("live data plane starts degraded: %s", type(error).__name__)
+    # ACTUATION_TARGET=sim wires a second, local telemetry producer (the sim
+    # ingest/planner/schedule loop) that writes through the same
+    # store.ingest.ingest_raw_batch path `worker` above uses for real MQTT,
+    # so `read_model` stays the single DB-backed read source for both. No-op
+    # (returns (None, None)) for any other ACTUATION_TARGET.
+    wiring.build(config)
     await runtime.start()
+    await wiring.start()
     try:
         yield
     finally:
+        await wiring.stop()
         await runtime.stop()
         runtime.configure_data_plane(None)
         service.configure_data_plane(None, mqtt_enabled=False)

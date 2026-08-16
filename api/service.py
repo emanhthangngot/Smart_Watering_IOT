@@ -27,6 +27,29 @@ from .simulator import (
 class FarmWorkflowPort(Protocol):
     def submit_request(self, request: dict[str, Any]) -> None: ...
 
+    def on_approved(self, plan: dict[str, Any], approval: dict[str, Any]) -> None:
+        """Optional: called after a plan is APPROVEd, before the HTTP response
+        returns. Absent on workflows that do not execute anything on approval."""
+
+
+class TelemetryPort(Protocol):
+    """Read-only façade the real `FarmPipeline` implements (api/pipeline.py).
+
+    `FarmStateReadPort` (Postgres, below) is the single source of truth for
+    device freshness/state/values regardless of whether telemetry came from
+    the real MQTT broker or the `ACTUATION_TARGET=sim` loop — both write
+    through the same `store.ingest.ingest_raw_batch` path. This port only
+    adds real-time trust scoring (DCS/tier), which has no DB-backed
+    equivalent yet and is only ever computed while the sim loop is active."""
+
+    def health_snapshot(self) -> dict[str, Any]: ...
+
+    def scope_verdicts(self) -> list[dict[str, Any]]: ...
+
+    def device_trust(self) -> list[dict[str, Any]]: ...
+
+    def evidence_health(self) -> dict[str, Any]: ...
+
 
 class FarmStateReadPort(Protocol):
     async def snapshot(self, now: datetime | None = None) -> dict[str, Any]: ...
@@ -57,6 +80,8 @@ class FarmOpsService:
         self.data_plane: FarmStateReadPort | None = None
         self.ingestion_status: Callable[[], dict[str, Any]] | None = None
         self.mqtt_enabled = False
+        self.telemetry: TelemetryPort | None = None
+        self.active_plans: dict[str, str] = {}  # plan_lineage_id -> plan_revision_id
 
     def create_farm_request(
         self,
@@ -119,18 +144,23 @@ class FarmOpsService:
     async def farm_state(self) -> dict[str, Any]:
         with self._lock:
             data_plane = self.data_plane
+            telemetry = self.telemetry
             local_plans = copy.deepcopy(list(self.plans.values()))
             local_tasks = copy.deepcopy(list(self.tasks.values()))
             agents = "AVAILABLE" if self.workflow is not None else "UNAVAILABLE"
+            active_plan = None
+            for lineage_id, revision_id in self.active_plans.items():
+                plan = self.plans.get(revision_id)
+                if plan is not None and plan.get("status") in {"PROPOSED", "APPROVED", "EXECUTING"}:
+                    active_plan = {"planLineageId": lineage_id, "planRevisionId": revision_id}
+
         if data_plane is None:
             return {
                 "status": "PARTIAL",
                 "farmStateVersion": 0,
-                "integration": {
-                    "dataPlane": "UNAVAILABLE",
-                    "agents": agents,
-                },
+                "integration": {"dataPlane": "UNAVAILABLE", "agents": agents},
                 "devices": [],
+                "activePlan": active_plan,
                 "plans": local_plans,
                 "inspectionTasks": local_tasks,
             }
@@ -145,15 +175,37 @@ class FarmOpsService:
                 "integration": {"dataPlane": "UNAVAILABLE", "agents": agents},
                 "ingestion": {"state": "UNAVAILABLE"},
                 "devices": [],
+                "activePlan": active_plan,
                 "plans": local_plans,
                 "inspectionTasks": local_tasks,
             }
         state.setdefault("integration", {})["agents"] = agents
-        if not state.get("plans") and local_plans:
+        state["activePlan"] = active_plan
+        # The in-memory plan/task façade tracks post-creation status
+        # transitions (APPROVED/EXECUTING/DONE, inspection tasks) that this
+        # pass does not persist back to Postgres (only the initial plan
+        # revision + edges are durably written); prefer it over the DB
+        # projection whenever local state exists so the operator view is
+        # never stuck on a stale PROPOSED status.
+        if local_plans:
             state["plans"] = local_plans
-        if not state.get("inspectionTasks") and local_tasks:
+        if local_tasks:
             state["inspectionTasks"] = local_tasks
+        if telemetry is not None:
+            self._merge_device_trust(state, telemetry)
+            state["evidenceHealth"] = telemetry.evidence_health()
         return state
+
+    def _merge_device_trust(self, state: dict[str, Any], telemetry: TelemetryPort) -> None:
+        """Overlays real DCS/tier trust scoring (only ever computed while the
+        sim loop is active) onto the DB-backed device freshness/state rows."""
+        trust_by_device = {row["deviceCode"]: row for row in telemetry.device_trust()}
+        for device in state.get("devices", []):
+            trust = trust_by_device.get(device.get("deviceCode"))
+            if trust is not None:
+                device["dcs"] = trust.get("dcs")
+                device["tier"] = trust.get("tier")
+                device["trustReasons"] = trust.get("reasons", [])
 
     def configure_data_plane(
         self,
@@ -228,7 +280,19 @@ class FarmOpsService:
                 operator,
                 {"approvalId": approval_id, "planRevisionId": plan_revision_id},
             )
-            return approval
+            workflow = self.workflow
+            plan_snapshot = copy.deepcopy(plan)
+        if decision == "APPROVE" and workflow is not None:
+            on_approved = getattr(workflow, "on_approved", None)
+            if callable(on_approved):
+                try:
+                    on_approved(plan_snapshot, dict(approval))
+                except Exception:
+                    with self._lock:
+                        self._system_audit(
+                            "approval.execution_failed", {"planRevisionId": plan_revision_id}
+                        )
+        return approval
 
     def list_tasks(self) -> list[dict[str, Any]]:
         with self._lock:
@@ -284,6 +348,46 @@ class FarmOpsService:
     def configure_workflow(self, workflow: FarmWorkflowPort) -> None:
         with self._lock:
             self.workflow = workflow
+
+    def configure_telemetry(self, telemetry: TelemetryPort) -> None:
+        with self._lock:
+            self.telemetry = telemetry
+
+    def upsert_plan(self, plan: dict[str, Any]) -> None:
+        with self._lock:
+            self.plans[plan["planRevisionId"]] = plan
+
+    def set_active_plan(self, plan_lineage_id: str, plan_revision_id: str) -> None:
+        with self._lock:
+            self.active_plans[plan_lineage_id] = plan_revision_id
+
+    def set_plan_status(self, plan_revision_id: str, plan_status: str) -> None:
+        with self._lock:
+            plan = self.plans.get(plan_revision_id)
+            if plan is not None:
+                plan["status"] = plan_status
+
+    def record_verification(self, plan_revision_id: str, verification: dict[str, Any]) -> None:
+        with self._lock:
+            plan = self.plans.get(plan_revision_id)
+            if plan is not None:
+                plan.setdefault("verifications", []).append(verification)
+
+    def append_timeline_event(self, trace_id: str, event: dict[str, Any]) -> None:
+        with self._lock:
+            self.timeline.setdefault(trace_id, []).append(event)
+
+    def record_explanation(self, decision_id: str, nodes: list[dict[str, Any]]) -> None:
+        with self._lock:
+            self.explanations[decision_id] = {"decisionId": decision_id, "nodes": nodes}
+
+    def add_task(self, task: dict[str, Any]) -> None:
+        with self._lock:
+            self.tasks[task["id"]] = task
+
+    def scope_verdicts(self) -> list[dict[str, Any]]:
+        with self._lock:
+            return self.telemetry.scope_verdicts() if self.telemetry is not None else []
 
     def submit_sim_command(
         self,
@@ -387,6 +491,7 @@ class FarmOpsService:
             status_provider = self.ingestion_status
             mqtt_enabled = self.mqtt_enabled
             agents_ready = self.workflow is not None
+            telemetry = self.telemetry
 
         database_health: dict[str, Any] = {
             "database": "UNAVAILABLE",
@@ -408,23 +513,32 @@ class FarmOpsService:
                 "outboxDepth": outbox_depth(),
             }
         )
-        healthy = (
+        db_ok = (
             database_health.get("database") == "AVAILABLE"
             and database_health.get("state") == "LIVE"
-            and worker_health.get("mqttState") == "CONNECTED"
         )
+        # A sim/dev-mode server intentionally never opens MQTT (mqtt_enabled
+        # is false when no broker credentials are set); only treat a missing
+        # MQTT connection as degraded when the worker is actually enabled.
+        mqtt_ok = (
+            not worker_health.get("enabled", False)
+            or worker_health.get("mqttState") == "CONNECTED"
+        )
+        trust_extra = telemetry.health_snapshot() if telemetry is not None else {}
         return {
-            "status": "ok" if healthy else "degraded",
+            "status": "ok" if db_ok and mqtt_ok else "degraded",
             "uptimeSeconds": round(time.monotonic() - self.started_at, 3),
             "batchPeriodSeconds": database_health.get("observedPeriodSeconds"),
-            "lateRatio": None,
-            "clockSkewSeconds": None,
+            "lateRatio": trust_extra.get("lateRatio"),
+            "clockSkewSeconds": trust_extra.get("clockSkewSeconds"),
+            "missingDevices": trust_extra.get("missingDevices", []),
+            "reasons": trust_extra.get("reasons", []),
             "outboxDepth": worker_health.get("outboxDepth", 0),
             "database": database_health,
             "ingestion": worker_health,
             "integrations": {
                 "dataPlane": database_health.get("database", "UNAVAILABLE"),
-                "trust": "pending M2",
+                "trust": "ready" if telemetry is not None else "pending M2",
                 "agents": "ready" if agents_ready else "pending M3",
             },
         }
