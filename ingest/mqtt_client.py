@@ -26,6 +26,7 @@ _RECONNECT_MIN_DELAY_S = 1
 _RECONNECT_MAX_DELAY_S = 60
 
 BatchHandler = Callable[[dict], None]
+StatusHandler = Callable[[str], None]
 
 
 class MqttClient:
@@ -33,9 +34,15 @@ class MqttClient:
     `on_batch`. Reconnects with backoff on drop; never crashes the process.
     """
 
-    def __init__(self, config: Config, on_batch: BatchHandler) -> None:
+    def __init__(
+        self,
+        config: Config,
+        on_batch: BatchHandler,
+        on_status: StatusHandler | None = None,
+    ) -> None:
         self._config = config
         self._on_batch = on_batch
+        self._on_status = on_status or (lambda status: None)
         self._client = mqtt.Client(
             client_id=config.mqtt_client_id,
             transport="websockets",
@@ -54,16 +61,22 @@ class MqttClient:
     def _handle_connect(self, client, userdata, flags, reason_code, properties=None) -> None:
         if reason_code != 0:
             logger.warning("mqtt: connect failed, reason_code=%s", reason_code)
+            self._on_status("CONNECT_FAILED")
             return
         logger.info("mqtt: connected, subscribing to %s", self._config.mqtt_topic)
+        self._on_status("CONNECTED")
         client.subscribe(self._config.mqtt_topic, qos=QOS)
 
     def _handle_disconnect(
         self, client, userdata, disconnect_flags, reason_code, properties=None
     ) -> None:
-        logger.warning(
-            "mqtt: disconnected (reason_code=%s), reconnecting with backoff", reason_code
-        )
+        if reason_code == 0:
+            logger.info("mqtt: disconnected normally")
+        else:
+            logger.warning(
+                "mqtt: disconnected (reason_code=%s), reconnecting with backoff", reason_code
+            )
+        self._on_status("DISCONNECTED")
 
     def _handle_message(self, client, userdata, message) -> None:
         try:

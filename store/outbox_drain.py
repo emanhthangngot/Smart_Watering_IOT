@@ -12,6 +12,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+import threading
 from pathlib import Path
 
 import asyncpg
@@ -24,31 +26,48 @@ OUTBOX_DIR = Path(__file__).with_name("outbox")
 OUTBOX_FILE = OUTBOX_DIR / "pending.jsonl"
 
 DRAIN_INTERVAL_S = 10
+_FILE_LOCK = threading.Lock()
+
+
+def _draining_file() -> Path:
+    return OUTBOX_FILE.with_name(f"{OUTBOX_FILE.name}.draining")
+
+
+def _lines(path: Path) -> list[str]:
+    if not path.exists():
+        return []
+    return [line for line in path.read_text().splitlines() if line.strip()]
 
 
 def write_to_outbox(payload: dict) -> None:
-    OUTBOX_DIR.mkdir(parents=True, exist_ok=True)
-    with OUTBOX_FILE.open("a") as f:
-        f.write(json.dumps(payload) + "\n")
+    with _FILE_LOCK:
+        OUTBOX_DIR.mkdir(parents=True, exist_ok=True)
+        with OUTBOX_FILE.open("a") as f:
+            f.write(json.dumps(payload) + "\n")
 
 
 def outbox_depth() -> int:
     """Number of pending batches — surfaced on /health per §11.4."""
-    if not OUTBOX_FILE.exists():
-        return 0
-    with OUTBOX_FILE.open() as f:
-        return sum(1 for line in f if line.strip())
+    with _FILE_LOCK:
+        return len(_lines(OUTBOX_FILE)) + len(_lines(_draining_file()))
 
 
 async def drain_once() -> int:
     """Replay the outbox in order. Stops at the first failure so ordering
     and at-least-once delivery are preserved; returns the number drained.
     """
-    if not OUTBOX_FILE.exists():
-        return 0
-
-    lines = [line for line in OUTBOX_FILE.read_text().splitlines() if line.strip()]
+    draining_file = _draining_file()
+    # Atomically detach the current queue. New failures append to a fresh
+    # pending file while this immutable segment is replayed.
+    with _FILE_LOCK:
+        OUTBOX_DIR.mkdir(parents=True, exist_ok=True)
+        if not draining_file.exists() and OUTBOX_FILE.exists():
+            os.replace(OUTBOX_FILE, draining_file)
+        lines = _lines(draining_file)
     if not lines:
+        with _FILE_LOCK:
+            if draining_file.exists():
+                draining_file.unlink()
         return 0
 
     pool = await get_pool()
@@ -66,10 +85,18 @@ async def drain_once() -> int:
             logger.warning("outbox drain: still failing, stopping this pass: %s", exc)
             break
 
-    if remaining:
-        OUTBOX_FILE.write_text("\n".join(remaining) + "\n")
-    else:
-        OUTBOX_FILE.write_text("")
+    with _FILE_LOCK:
+        newly_queued = _lines(OUTBOX_FILE)
+        if remaining:
+            # Failed old entries must stay before batches that arrived while
+            # replay was in flight. Replace atomically so a crash yields at
+            # worst an idempotent duplicate, never a lost batch.
+            merged = remaining + newly_queued
+            temp_file = OUTBOX_FILE.with_name(f".{OUTBOX_FILE.name}.merge.tmp")
+            temp_file.write_text("\n".join(merged) + "\n")
+            os.replace(temp_file, OUTBOX_FILE)
+        if draining_file.exists():
+            draining_file.unlink()
 
     return drained
 

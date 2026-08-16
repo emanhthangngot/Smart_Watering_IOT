@@ -7,7 +7,7 @@ router = APIRouter(tags=["health"])
 
 
 @router.get("/health")
-def health() -> dict:
-    result = service.health()
+async def health() -> dict:
+    result = await service.health()
     result["runtime"] = runtime.snapshot()
     return result

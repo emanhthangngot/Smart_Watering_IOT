@@ -26,8 +26,8 @@ def create_request(
 
 
 @router.get("/state")
-def get_state() -> dict:
-    return service.farm_state()
+async def get_state() -> dict:
+    return await service.farm_state()
 
 
 @router.get("/plan/{revision_id}")

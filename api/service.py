@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import copy
+import logging
 import threading
 import time
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
 from fastapi import HTTPException, status
 
+from store.outbox_drain import outbox_depth
 from tools.idempotency import IdempotencyStore
 
 from .auth import OperatorIdentity
@@ -23,6 +26,15 @@ from .simulator import (
 
 class FarmWorkflowPort(Protocol):
     def submit_request(self, request: dict[str, Any]) -> None: ...
+
+
+class FarmStateReadPort(Protocol):
+    async def snapshot(self, now: datetime | None = None) -> dict[str, Any]: ...
+
+    async def health(self, now: datetime | None = None) -> dict[str, Any]: ...
+
+
+logger = logging.getLogger(__name__)
 
 
 def utc_now() -> datetime:
@@ -42,6 +54,9 @@ class FarmOpsService:
         self.audit: list[dict[str, Any]] = []
         self.simulator_control: SimulatorControlGate | None = None
         self.workflow: FarmWorkflowPort | None = None
+        self.data_plane: FarmStateReadPort | None = None
+        self.ingestion_status: Callable[[], dict[str, Any]] | None = None
+        self.mqtt_enabled = False
 
     def create_farm_request(
         self,
@@ -101,18 +116,56 @@ class FarmOpsService:
             self._audit("farm.request.accepted", operator, {"traceId": trace_id})
         return {"traceId": trace_id, "planLineageId": lineage_id}
 
-    def farm_state(self) -> dict[str, Any]:
+    async def farm_state(self) -> dict[str, Any]:
         with self._lock:
+            data_plane = self.data_plane
+            local_plans = copy.deepcopy(list(self.plans.values()))
+            local_tasks = copy.deepcopy(list(self.tasks.values()))
+            agents = "AVAILABLE" if self.workflow is not None else "UNAVAILABLE"
+        if data_plane is None:
             return {
                 "status": "PARTIAL",
                 "farmStateVersion": 0,
                 "integration": {
                     "dataPlane": "UNAVAILABLE",
-                    "agents": "AVAILABLE" if self.workflow is not None else "UNAVAILABLE",
+                    "agents": agents,
                 },
-                "plans": copy.deepcopy(list(self.plans.values())),
-                "inspectionTasks": copy.deepcopy(list(self.tasks.values())),
+                "devices": [],
+                "plans": local_plans,
+                "inspectionTasks": local_tasks,
             }
+        try:
+            state = await data_plane.snapshot()
+        except Exception as error:
+            logger.warning("farm state database read unavailable: %s", type(error).__name__)
+            return {
+                "status": "UNAVAILABLE",
+                "farmStateVersion": 0,
+                "dataSource": "postgresql",
+                "integration": {"dataPlane": "UNAVAILABLE", "agents": agents},
+                "ingestion": {"state": "UNAVAILABLE"},
+                "devices": [],
+                "plans": local_plans,
+                "inspectionTasks": local_tasks,
+            }
+        state.setdefault("integration", {})["agents"] = agents
+        if not state.get("plans") and local_plans:
+            state["plans"] = local_plans
+        if not state.get("inspectionTasks") and local_tasks:
+            state["inspectionTasks"] = local_tasks
+        return state
+
+    def configure_data_plane(
+        self,
+        read_model: FarmStateReadPort | None,
+        *,
+        mqtt_enabled: bool,
+        ingestion_status: Callable[[], dict[str, Any]] | None = None,
+    ) -> None:
+        with self._lock:
+            self.data_plane = read_model
+            self.mqtt_enabled = mqtt_enabled
+            self.ingestion_status = ingestion_status
 
     def get_plan(self, revision_id: str) -> dict[str, Any]:
         with self._lock:
@@ -328,18 +381,51 @@ class FarmOpsService:
                     self._system_audit("proposal.expired", {"planRevisionId": revision_id})
         return expired
 
-    def health(self) -> dict[str, Any]:
+    async def health(self) -> dict[str, Any]:
+        with self._lock:
+            data_plane = self.data_plane
+            status_provider = self.ingestion_status
+            mqtt_enabled = self.mqtt_enabled
+            agents_ready = self.workflow is not None
+
+        database_health: dict[str, Any] = {
+            "database": "UNAVAILABLE",
+            "state": "UNAVAILABLE",
+        }
+        if data_plane is not None:
+            try:
+                database_health = await data_plane.health()
+            except Exception as error:
+                logger.warning("health database read unavailable: %s", type(error).__name__)
+
+        worker_health = (
+            status_provider()
+            if status_provider is not None
+            else {
+                "enabled": False,
+                "mqttState": "DISABLED" if not mqtt_enabled else "STARTING",
+                "queueDepth": 0,
+                "outboxDepth": outbox_depth(),
+            }
+        )
+        healthy = (
+            database_health.get("database") == "AVAILABLE"
+            and database_health.get("state") == "LIVE"
+            and worker_health.get("mqttState") == "CONNECTED"
+        )
         return {
-            "status": "degraded",
+            "status": "ok" if healthy else "degraded",
             "uptimeSeconds": round(time.monotonic() - self.started_at, 3),
-            "batchPeriodSeconds": None,
+            "batchPeriodSeconds": database_health.get("observedPeriodSeconds"),
             "lateRatio": None,
             "clockSkewSeconds": None,
-            "outboxDepth": None,
+            "outboxDepth": worker_health.get("outboxDepth", 0),
+            "database": database_health,
+            "ingestion": worker_health,
             "integrations": {
-                "dataPlane": "pending M1",
+                "dataPlane": database_health.get("database", "UNAVAILABLE"),
                 "trust": "pending M2",
-                "agents": "ready" if self.workflow is not None else "pending M3",
+                "agents": "ready" if agents_ready else "pending M3",
             },
         }
 

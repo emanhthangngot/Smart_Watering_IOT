@@ -9,7 +9,6 @@ Bring one up locally with:
 from __future__ import annotations
 
 import asyncio
-import time
 import uuid
 from collections.abc import Callable, Coroutine
 from typing import Any
@@ -127,7 +126,10 @@ def test_append_plan_revision_rolls_back_edges_on_duplicate_revision_id():
 def test_purge_expired_readings_deletes_only_old_batches():
     team_code = f"TEST_{uuid.uuid4().hex[:6]}"
     old_epoch = 1
-    fresh_epoch = int(time.time())
+    # Keep the retention test inside an ancient, test-only epoch range. Using
+    # the current epoch as cutoff would delete unrelated live demo telemetry
+    # from the shared local PostgreSQL volume.
+    fresh_epoch = 3
 
     async def scenario(pool: asyncpg.Pool) -> tuple[int, Any]:
         async with pool.acquire() as connection:
@@ -249,9 +251,7 @@ def test_purge_expired_readings_skips_rows_still_cited_by_an_edge():
                 f"e_{uuid.uuid4().hex[:8]}",
                 reading_id,
             )
-        deleted = await purge_expired_readings(
-            pool, "soil_01_readings", cutoff_epoch=int(time.time())
-        )
+        deleted = await purge_expired_readings(pool, "soil_01_readings", cutoff_epoch=2)
         remaining = await pool.fetchval(
             "select count(*) from soil_01_readings where id = $1", reading_id
         )

@@ -84,31 +84,31 @@ create table sun_01_readings (
 create index on sun_01_readings (team_code, epoch desc);
 
 create view readings_all as
-  select id, 'SOIL_01' as device, 'soil_moisture' as metric, soil_moisture as value, epoch, event_time, received_at, source_status, late, scenario
+  select id, 'SOIL_01' as device, 'soil_moisture' as metric, soil_moisture as value, epoch, event_time, received_at, source_status, late, scenario, team_code
     from soil_01_readings where soil_moisture is not null
   union all
-  select id, 'SOIL_01' as device, 'temperature' as metric, temperature as value, epoch, event_time, received_at, source_status, late, scenario
+  select id, 'SOIL_01' as device, 'temperature' as metric, temperature as value, epoch, event_time, received_at, source_status, late, scenario, team_code
     from soil_01_readings where temperature is not null
   union all
-  select id, 'WEATHER_01' as device, 'temperature' as metric, temperature as value, epoch, event_time, received_at, source_status, late, scenario
+  select id, 'WEATHER_01' as device, 'temperature' as metric, temperature as value, epoch, event_time, received_at, source_status, late, scenario, team_code
     from weather_01_readings where temperature is not null
   union all
-  select id, 'WEATHER_01' as device, 'humidity' as metric, humidity as value, epoch, event_time, received_at, source_status, late, scenario
+  select id, 'WEATHER_01' as device, 'humidity' as metric, humidity as value, epoch, event_time, received_at, source_status, late, scenario, team_code
     from weather_01_readings where humidity is not null
   union all
-  select id, 'PUMP_01' as device, 'flow_rate' as metric, flow_rate as value, epoch, event_time, received_at, source_status, late, scenario
+  select id, 'PUMP_01' as device, 'flow_rate' as metric, flow_rate as value, epoch, event_time, received_at, source_status, late, scenario, team_code
     from pump_01_readings where flow_rate is not null
   union all
-  select id, 'PUMP_01' as device, 'power' as metric, power as value, epoch, event_time, received_at, source_status, late, scenario
+  select id, 'PUMP_01' as device, 'power' as metric, power as value, epoch, event_time, received_at, source_status, late, scenario, team_code
     from pump_01_readings where power is not null
   union all
-  select id, 'PH_01' as device, 'ph' as metric, ph as value, epoch, event_time, received_at, source_status, late, scenario
+  select id, 'PH_01' as device, 'ph' as metric, ph as value, epoch, event_time, received_at, source_status, late, scenario, team_code
     from ph_01_readings where ph is not null
   union all
-  select id, 'TANK_01' as device, 'level' as metric, level as value, epoch, event_time, received_at, source_status, late, scenario
+  select id, 'TANK_01' as device, 'level' as metric, level as value, epoch, event_time, received_at, source_status, late, scenario, team_code
     from tank_01_readings where level is not null
   union all
-  select id, 'SUN_01' as device, 'lux' as metric, lux as value, epoch, event_time, received_at, source_status, late, scenario
+  select id, 'SUN_01' as device, 'lux' as metric, lux as value, epoch, event_time, received_at, source_status, late, scenario, team_code
     from sun_01_readings where lux is not null
 ;
 
@@ -262,6 +262,23 @@ create table if not exists trust_snapshots (
   created_at          timestamptz not null default now()
 );
 
+-- Durable batch-level evidence distinguishes a stopped whole feed from one
+-- device omitted by newer snapshots and survives API/worker restarts.
+create table if not exists ingest_batches (
+  batch_id            text primary key,
+  epoch               bigint not null,
+  event_time          timestamptz not null,
+  source_received_at  timestamptz not null,
+  stored_at           timestamptz not null default now(),
+  team_code           text not null,
+  environment         text not null,
+  scenario            text,
+  device_codes        jsonb not null default '[]'::jsonb,
+  reading_count       int not null default 0
+);
+create index if not exists ingest_batches_team_received
+  on ingest_batches (team_code, source_received_at desc);
+
 -- schedule/models.py::Schedule, schedule/claim.py::ScheduleRepository.
 -- Added for coordination gate C4 (durable schedule state across restart);
 -- mirrors InMemoryScheduleRepository's column shape 1:1.
@@ -301,39 +318,57 @@ declare
   v_team_code  text := payload->>'teamCode';
   v_scenario   text := payload->>'scenario';
   v_late       boolean := coalesce((payload->>'late')::boolean, false);
+  v_batch_id   text := coalesce(payload->>'batchId', 'b_' || md5(payload::text));
+  v_received_at timestamptz := coalesce(
+    (payload->>'sourceReceivedAt')::timestamptz,
+    now()
+  );
+  v_device_codes jsonb := coalesce(
+    payload->'deviceCodes',
+    (select coalesce(jsonb_agg(item->>'deviceCode'), '[]'::jsonb)
+       from jsonb_array_elements(coalesce(payload->'devices', '[]'::jsonb)) item)
+  );
   d            jsonb;
 begin
   for d in select * from jsonb_array_elements(coalesce(payload->'devices', '[]'::jsonb)) loop
     case d->>'deviceCode'
       when 'SOIL_01' then
-        insert into soil_01_readings (id, epoch, event_time, team_code, scenario, source_status, late, soil_moisture, temperature)
-        values ((d->>'id'), v_epoch, v_event_time, v_team_code, v_scenario, (d->>'status'), v_late, (d->'metrics'->>'soil_moisture')::double precision, (d->'metrics'->>'temperature')::double precision)
+        insert into soil_01_readings (id, epoch, event_time, received_at, team_code, scenario, source_status, late, soil_moisture, temperature)
+        values ((d->>'id'), v_epoch, v_event_time, v_received_at, v_team_code, v_scenario, (d->>'status'), v_late, (d->'metrics'->>'soil_moisture')::double precision, (d->'metrics'->>'temperature')::double precision)
         on conflict (id) do nothing;
       when 'WEATHER_01' then
-        insert into weather_01_readings (id, epoch, event_time, team_code, scenario, source_status, late, temperature, humidity)
-        values ((d->>'id'), v_epoch, v_event_time, v_team_code, v_scenario, (d->>'status'), v_late, (d->'metrics'->>'temperature')::double precision, (d->'metrics'->>'humidity')::double precision)
+        insert into weather_01_readings (id, epoch, event_time, received_at, team_code, scenario, source_status, late, temperature, humidity)
+        values ((d->>'id'), v_epoch, v_event_time, v_received_at, v_team_code, v_scenario, (d->>'status'), v_late, (d->'metrics'->>'temperature')::double precision, (d->'metrics'->>'humidity')::double precision)
         on conflict (id) do nothing;
       when 'PUMP_01' then
-        insert into pump_01_readings (id, epoch, event_time, team_code, scenario, source_status, late, flow_rate, power)
-        values ((d->>'id'), v_epoch, v_event_time, v_team_code, v_scenario, (d->>'status'), v_late, (d->'metrics'->>'flow_rate')::double precision, (d->'metrics'->>'power')::double precision)
+        insert into pump_01_readings (id, epoch, event_time, received_at, team_code, scenario, source_status, late, flow_rate, power)
+        values ((d->>'id'), v_epoch, v_event_time, v_received_at, v_team_code, v_scenario, (d->>'status'), v_late, (d->'metrics'->>'flow_rate')::double precision, (d->'metrics'->>'power')::double precision)
         on conflict (id) do nothing;
       when 'PH_01' then
-        insert into ph_01_readings (id, epoch, event_time, team_code, scenario, source_status, late, ph)
-        values ((d->>'id'), v_epoch, v_event_time, v_team_code, v_scenario, (d->>'status'), v_late, (d->'metrics'->>'ph')::double precision)
+        insert into ph_01_readings (id, epoch, event_time, received_at, team_code, scenario, source_status, late, ph)
+        values ((d->>'id'), v_epoch, v_event_time, v_received_at, v_team_code, v_scenario, (d->>'status'), v_late, (d->'metrics'->>'ph')::double precision)
         on conflict (id) do nothing;
       when 'TANK_01' then
-        insert into tank_01_readings (id, epoch, event_time, team_code, scenario, source_status, late, level)
-        values ((d->>'id'), v_epoch, v_event_time, v_team_code, v_scenario, (d->>'status'), v_late, (d->'metrics'->>'level')::double precision)
+        insert into tank_01_readings (id, epoch, event_time, received_at, team_code, scenario, source_status, late, level)
+        values ((d->>'id'), v_epoch, v_event_time, v_received_at, v_team_code, v_scenario, (d->>'status'), v_late, (d->'metrics'->>'level')::double precision)
         on conflict (id) do nothing;
       when 'SUN_01' then
-        insert into sun_01_readings (id, epoch, event_time, team_code, scenario, source_status, late, lux)
-        values ((d->>'id'), v_epoch, v_event_time, v_team_code, v_scenario, (d->>'status'), v_late, (d->'metrics'->>'lux')::double precision)
+        insert into sun_01_readings (id, epoch, event_time, received_at, team_code, scenario, source_status, late, lux)
+        values ((d->>'id'), v_epoch, v_event_time, v_received_at, v_team_code, v_scenario, (d->>'status'), v_late, (d->'metrics'->>'lux')::double precision)
         on conflict (id) do nothing;
       else
         -- unknown deviceCode: ignored here, counted upstream by ingest/normalize.py
         null;
     end case;
   end loop;
+  insert into ingest_batches (
+    batch_id, epoch, event_time, source_received_at, team_code, environment,
+    scenario, device_codes, reading_count
+  ) values (
+    v_batch_id, v_epoch, v_event_time, v_received_at, v_team_code,
+    coalesce(payload->>'environment', ''), v_scenario, v_device_codes,
+    coalesce((payload->>'readingCount')::int, 0)
+  ) on conflict (batch_id) do nothing;
 end;
 $$ language plpgsql;
 
@@ -359,4 +394,5 @@ alter table inspection_tasks enable row level security;
 alter table notifications enable row level security;
 alter table audit_log enable row level security;
 alter table trust_snapshots enable row level security;
+alter table ingest_batches enable row level security;
 alter table schedules enable row level security;

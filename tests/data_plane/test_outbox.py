@@ -132,3 +132,25 @@ def test_drain_stops_at_first_failure_preserving_order(monkeypatch, _reset_outbo
 
     assert drained == 0
     assert store.outbox_drain.outbox_depth() == 2  # nothing lost, order preserved
+
+
+@pytest.mark.data_plane
+def test_batch_appended_while_drain_is_running_is_not_overwritten(_reset_outbox, monkeypatch):
+    store.outbox_drain.write_to_outbox({"epoch": 1, "devices": []})
+
+    class AppendingConn(_FakeConn):
+        async def execute(self, query, *args):
+            await super().execute(query, *args)
+            store.outbox_drain.write_to_outbox({"epoch": 2, "devices": []})
+
+    fake_pool = _FakePool(fail=False)
+    fake_pool._conn = AppendingConn(fail=False)
+
+    async def fake_get_pool(*a, **kw):
+        return fake_pool
+
+    monkeypatch.setattr(store.outbox_drain, "get_pool", fake_get_pool)
+
+    assert asyncio.run(store.outbox_drain.drain_once()) == 1
+    assert store.outbox_drain.outbox_depth() == 1
+    assert json.loads(_reset_outbox.read_text())["epoch"] == 2
