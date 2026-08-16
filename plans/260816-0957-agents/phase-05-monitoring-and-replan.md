@@ -23,7 +23,7 @@ Build the pure invalidation guard now: touched-assumption selection, explicit-ti
 ## Requirements
 
 - Functional: evaluate only assumptions touched by changed evidence/metrics.
-- Functional: idempotency identity is `(plan_revision_id, assumption_id, triggering_evidence_version)`; C0/dev must define what the evidence version represents before persistence.
+- Functional: idempotency identity is `(plan_revision_id, assumption_id, triggering_evidence_version)`; the selected evidence version is the monotonic `farmStateVersion`.
 - Functional: repeated evidence inside one observation window produces one invalidation/suspension.
 - Functional: at most one open replan per `(plan_revision_id, assumption_id)`.
 - Functional: replan creates V(n+1) and never mutates Vn after C0/C1.
@@ -92,7 +92,7 @@ Effects consume accepted durable pending-effect records. This is a narrow transa
 
 ## Implementation Steps
 
-1. Ask dev/C0 owner to define `triggering_evidence_version` (`farmStateVersion`, batch epoch, or other). Implement persistence only after answer.
+1. Record `farmStateVersion` as the selected `triggering_evidence_version`; implement only the in-memory READY NOW guard here, while durable persistence still waits for C0/C1.
 2. Write pure selection tests, then implement the dependency index/touched selection.
 3. Write explicit-time debounce and duplicate tests, then implement `InvalidationGuard`.
 4. Write the one-open-replan transition test including close/reopen.
@@ -128,12 +128,12 @@ Effects consume accepted durable pending-effect records. This is a narrow transa
 
 ## Success Criteria
 
-- [ ] `pytest -q tests/agents/test_monitor.py tests/agents/test_monitor_stress.py -m agents` passes offline.
-- [ ] Stress test demonstrates at most one suspension per debounce window and one open replan per assumption.
-- [ ] Every test module created by this phase is selected by `pytest -m agents`.
-- [ ] `agents/monitor.py` imports no tool, schedule, API, DB, or LLM client.
-- [ ] After C0-C4, replan/effect/recovery/race tests pass, no durable job is permanently orphaned, and Vn remains unchanged.
-- [ ] No MQTT batch causes an unconditional full-agent or LLM rerun.
+- [x] `pytest -q tests/agents/test_monitor.py tests/agents/test_monitor_stress.py -m agents` passes offline.
+- [x] Stress test demonstrates at most one suspension per debounce window and one open replan per assumption.
+- [x] Every test module created by this phase is selected by `pytest -m agents`.
+- [x] `agents/monitor.py` imports no tool, schedule, API, DB, or LLM client.
+- [ ] After C0-C4, replan/effect/recovery/race tests pass, no durable job is permanently orphaned, and Vn remains unchanged. (blocked on C0-C4)
+- [x] No MQTT batch causes an unconditional full-agent or LLM rerun.
 
 ## Risk Assessment
 

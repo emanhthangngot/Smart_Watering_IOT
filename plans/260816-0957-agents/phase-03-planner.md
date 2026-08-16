@@ -22,6 +22,7 @@ Deliver the allocator as the ready-now feature. It ranks urgency and allocates p
 ## Requirements
 
 - Functional: stable urgency ordering; tank-reserve, daily drawdown, pump-minute, no-overlap, and allowed-window constraints.
+- Functional: `AllocationCandidate.window` is a fixed requested execution interval; candidates with missing tank/reserve or allowed-window facts fail closed.
 - Functional: equal inputs produce byte-for-byte equivalent allocation data with a documented tie-breaker.
 - Functional: Planner returns a valid deterministic result when phrasing is disabled, unavailable, times out, or is rejected as ungrounded.
 - Functional: allocation input/output names `source_state_version`; trust/resource projections from any other version are rejected before ranking.
@@ -116,12 +117,12 @@ AllocationRequest
 
 ## Success Criteria
 
-- [ ] `pytest -q tests/agents/test_allocator.py tests/agents/test_planner_fallback.py -m agents` passes without network credentials.
-- [ ] `rg -n "(openai|anthropic|google|litellm|api_key)" agents/allocator.py` returns no provider coupling.
-- [ ] Repeated allocation of the same request returns equivalent ordered results.
-- [ ] Provider failure never prevents a deterministic proposal.
-- [ ] Every test module created by this phase is selected by `pytest -m agents`.
-- [ ] After C0/C1, shared Plan round-trip and immutable lineage tests pass; before that, these tasks remain blocked and are not faked.
+- [x] `pytest -q tests/agents/test_allocator.py tests/agents/test_planner_fallback.py -m agents` passes without network credentials.
+- [x] `rg -n "(openai|anthropic|google|litellm|api_key)" agents/allocator.py` returns no provider coupling.
+- [x] Repeated allocation of the same request returns equivalent ordered results.
+- [x] Provider failure never prevents a deterministic proposal.
+- [x] Every test module created by this phase is selected by `pytest -m agents`.
+- [ ] After C0/C1, shared Plan round-trip and immutable lineage tests pass; before that, these tasks remain blocked and are not faked. (blocked on C0/C1)
 
 ## Risk Assessment
 

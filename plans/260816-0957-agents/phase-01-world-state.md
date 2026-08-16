@@ -106,18 +106,27 @@ Do not create the previously proposed `worldstate/version.py`; versioning is one
 
 ## Success Criteria
 
-- [ ] `pytest -q tests/agents/test_world_state.py tests/agents/test_llm_slice.py -m agents` passes.
-- [ ] Two accepted updates always increment exactly once.
-- [ ] No caller can mutate an earlier snapshot through a shared nested reference.
-- [ ] No output from `build_llm_slice()` contains `scenario` at any depth.
-- [ ] Every test module created by this phase is selected by `pytest -m agents`.
-- [ ] After C1/C2, stale trust projections and competing snapshot appends fail closed.
-- [ ] `rg -n "import (asyncpg|store|trust|tools|api)" worldstate tests/agents/test_world_state.py tests/agents/test_llm_slice.py` returns no prohibited import.
+- [x] `pytest -q tests/agents/test_world_state.py tests/agents/test_llm_slice.py -m agents` passes.
+- [x] Two accepted updates always increment exactly once.
+- [x] No caller can mutate an earlier snapshot through a shared nested reference.
+- [x] No output from `build_llm_slice()` contains `scenario` at any depth.
+- [x] Every test module created by this phase is selected by `pytest -m agents`.
+- [ ] After C1/C2, stale trust projections and competing snapshot appends fail closed. (blocked on C1/C2)
+- [x] `rg -n "import (asyncpg|store|trust|tools|api)" worldstate tests/agents/test_world_state.py tests/agents/test_llm_slice.py` returns no prohibited import.
 
 ## Risk Assessment
 
 - Deep immutability can become an unnecessary generic framework. Use only the concrete §4.1 sections and copy-on-write containers needed by tests.
 - In-memory history is not production persistence. Mark it as the domain implementation, not a silent persistence substitute; C1 remains mandatory.
+
+## Decision: snapshot leaves stay JSON-shaped only
+
+`_freeze` accepts only str/int/float/bool/None/dict/list; `datetime`/`Decimal`
+raise. Callers that need those types (e.g. `agents/allocator.py`) keep them in
+their own frozen dataclasses, outside `FarmStateSnapshot.sections`, and convert
+to ISO-string/decimal-string before writing into the snapshot. This keeps the
+snapshot serializer canonical and matches the "one canonical serializer/hash
+after C0" gate. Reviewed 2026-08-16; keep as-is, not a defect.
 
 ## Rollback
 

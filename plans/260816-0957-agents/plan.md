@@ -66,6 +66,8 @@ Audited on 2026-08-16 using each local branch tip; feature branches are plan/ske
 
 Independent implementation order: phase 01 → phase 02 → phase 03 → phase 04 → phase 05. Phase 06 is not queued. Within a phase, complete only `READY NOW`; any task labeled `COORDINATION` remains pending until its ledger evidence exists.
 
+**READY NOW status (2026-08-16):** Phases 01-05 `READY NOW` scope is implemented and gate-verified: `pytest -q tests/agents -m agents` — 51 passed; `ruff check`/`ruff format --check` clean; `python -m compileall` clean; `git diff --check` clean; `make ownership` OK; independent tester and code-reviewer rerun both closed (all blocking findings fixed and reverified: allocator tank-headroom over-allocation, monitor watermark unbounded growth, import-boundary test blind spot, resource naive/aware datetime crash, evidence-ref metric charset). Each phase's per-item `READY NOW` success criteria are checked off in its phase file; items gated on C0-C8 remain unchecked by design. Plan-level `status: pending` is unchanged — overall completion still blocks on M1/M2/M4 per `blockedBy`.
+
 ## Coordination Ledger
 
 | ID | Owner | Required output | Current status | Unblock evidence |
@@ -78,7 +80,7 @@ Independent implementation order: phase 01 → phase 02 → phase 03 → phase 0
 | C5 | dev + M3 | One provider/model; fail-closed config; data-egress allowlist; redacted logging; timeout/output limits; secret rotation/constant-time auth rules | **Provider/security contract absent** | offline failure test plus opt-in provider/egress smoke test; no credential committed |
 | C6 | dev integrator | Ownership/location for N1-N4 scenario tests | **Owner/path absent** | scenario path accepted by ownership gate |
 | C7 | dev integrator | Partial merge order: M4 core → M3 core → dev-owned M4/M3 composition | **Current order deadlocks C4** | revised delivery merge table and integration commands |
-| C8 | M1 + dev + user | Globally unambiguous evidence ID format; current `r_` + 6 hex has collision risk | **User decision required** | DB uniqueness/collision test and frozen evidence-ref contract |
+| C8 | M1 + dev + user | Globally unambiguous evidence ID format: `r_` + full UUIDv4, backed by a DB unique constraint | **Decision recorded; owner contract still required** | DB uniqueness/collision test and frozen evidence-ref contract |
 
 No M3 task may satisfy C0-C8 by editing another owner's file or creating a local substitute.
 
@@ -134,18 +136,18 @@ P0: phases 01-05 closed-loop behavior. Phase 06 Reporting is deferred until an A
 | API/auth and provider security gaps | Accept as coordination | C4/C5 |
 | Internal AgentResponse duplicates Challenge | Accept | phase 02 narrowed to RouteSignal |
 | Reporting has no consumer | Accept | phase 06 deferred |
-| Six-hex evidence ID collision risk | **Pending user decision** | C8 |
+| Six-hex evidence ID collision risk | Resolved: use `r_` + full UUIDv4 plus DB uniqueness | C8 |
 
 ## Unresolved Questions
 
 - C0-C7 are evidenced cross-owner gaps; coordination must update the owner plans before final integration.
-- C8 needs user choice: retain `r_` + 6 hex with collision handling, or migrate the frozen contract to a globally unique ID.
-- `triggering_evidence_version` still needs one authority (`farmStateVersion`, batch epoch, or another version).
+- C8 decision recorded: use `r_` + full UUIDv4 plus a DB unique constraint; M1/dev must still freeze and test the shared contract.
+- `triggering_evidence_version` decision recorded: use the monotonic `farmStateVersion`; M1/dev must still expose it in the durable contract.
 
 ## Whole-Plan Consistency Sweep
 
 - Files reread: `plan.md`, phases 01-06, brainstorm report, master design, and the branch-qualified M1/M2/M4/M5 plans used during scouting.
 - Decision deltas reconciled: independent-first boundary, internal message narrowing, active reservation arithmetic, state-version binding, semantic grounding, durable replan/effects, retention, merge order, security gates, and Reporting deferral.
-- Red-team findings: 15 unique; 14 incorporated as plan changes; C8 remains an explicit user decision.
-- Stale internal contradictions: 0. Open external decisions: 2 (`C8` evidence identity and `triggering_evidence_version`).
+- Red-team findings: 15 unique; all decisions recorded; owner-side contract gates remain open.
+- Stale internal contradictions: 0. Open external decisions: none; C0-C8 owner evidence remains required.
 - Implementation recommendation: start only phases 01-05 `READY NOW`; do not start coordination adapters or phase 06 until their named gates close.

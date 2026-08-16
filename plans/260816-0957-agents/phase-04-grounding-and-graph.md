@@ -22,7 +22,7 @@ Build grounding, edge validation, and backward BFS as pure data operations now. 
 ## Requirements
 
 - Functional: `assert_grounded()` rejects every requested ref absent from the supplied available-ref set; it proves membership only, never semantic truth.
-- Functional: accepted evidence format is metric-qualified `readingId#metric`; final syntax validation waits for C0 because the master Plan example still contains bare IDs.
+- Functional: accepted evidence format is metric-qualified `r_<UUIDv4>#metric`; C8 selected the collision-safe identity, while C0 must still freeze the shared serializer before adapters.
 - Functional: numeric/status claims are accepted only when a typed decision-time evidence view proves metric, value/status, unit, state version, trust/freshness, and cited ref agree; unsupported semantic claims fall back to deterministic wording.
 - Functional: narration gets at most 2 grounding retries; the third path is deterministic allocation/reasons with no narration.
 - Functional: relations are exactly `supports`, `derived_from`, `produced`, `verified_by`, `invalidates`.
@@ -63,7 +63,7 @@ M3 emits Planner, Diagnosis, and Monitor edges. M4 emits Action and Verify edges
 - C1: edge repository, reading existence check, state-version/trust-snapshot lookup, and retention that preserves/materializes every referenced evidence node for the audit lifetime.
 - C2: version-bound trust/freshness values used by the semantic validator.
 - C4: M4 Action/Verify emitters and `/explain/{decisionId}` router.
-- C8: globally unambiguous evidence IDs and collision behavior; do not freeze the strict parser around six-hex IDs before this decision.
+- C8: globally unambiguous evidence IDs and collision behavior; the selected UUIDv4 format is enforced by the pure parser, while owner-side storage/serializer tests remain required.
 - INV-4 DB/integration test is appended only when real storage exists.
 
 ## File Inventory
@@ -125,13 +125,13 @@ M3 emits Planner, Diagnosis, and Monitor edges. M4 emits Action and Verify edges
 
 ## Success Criteria
 
-- [ ] `pytest -q tests/agents/test_grounding.py tests/agents/test_graph_edges.py tests/agents/test_explain.py -m agents` passes offline.
-- [ ] Narration call count is never greater than 2 for one plan attempt.
-- [ ] Citation membership alone cannot pass a mismatched numeric/status claim.
-- [ ] BFS output is deterministic and cycle-safe.
-- [ ] Every test module created by this phase is selected by `pytest -m agents`.
-- [ ] After C1/C4, `pytest -q tests/invariants/test_inv_04.py -m invariants` passes against real persisted data.
-- [ ] `/explain` stays M4-owned while traversal semantics stay M3-owned.
+- [x] `pytest -q tests/agents/test_grounding.py tests/agents/test_graph_edges.py tests/agents/test_explain.py -m agents` passes offline.
+- [x] Narration call count is never greater than 2 for one plan attempt.
+- [x] Citation membership alone cannot pass a mismatched numeric/status claim.
+- [x] BFS output is deterministic and cycle-safe.
+- [x] Every test module created by this phase is selected by `pytest -m agents`.
+- [ ] After C1/C4, `pytest -q tests/invariants/test_inv_04.py -m invariants` passes against real persisted data. (blocked on C1/C4)
+- [x] `/explain` stays M4-owned while traversal semantics stay M3-owned.
 
 ## Risk Assessment
 

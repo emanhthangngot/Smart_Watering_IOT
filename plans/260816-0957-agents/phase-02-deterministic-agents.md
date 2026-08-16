@@ -116,17 +116,26 @@ ResourceInput (numbers already supplied by adapters)
 
 ## Success Criteria
 
-- [ ] `pytest -q tests/agents/test_coordinator.py tests/agents/test_resource.py tests/agents/test_agent_boundaries.py -m agents` passes.
-- [ ] No Coordinator branch contains a numeric farm threshold.
-- [ ] Diagnosis/Resource/Coordinator source contains no import from `tools`, `schedule`, `verify`, or `api`.
-- [ ] Resource equality boundary is documented and tested; no floating comparison ambiguity remains.
-- [ ] Every test module created by this phase is selected by `pytest -m agents`.
-- [ ] Later C0/C2/C3 adapters have one mapping test each before use.
+- [x] `pytest -q tests/agents/test_coordinator.py tests/agents/test_resource.py tests/agents/test_agent_boundaries.py -m agents` passes.
+- [x] No Coordinator branch contains a numeric farm threshold.
+- [x] Diagnosis/Resource/Coordinator source contains no import from `tools`, `schedule`, `verify`, or `api`.
+- [x] Resource equality boundary is documented and tested; no floating comparison ambiguity remains.
+- [x] Every test module created by this phase is selected by `pytest -m agents`.
+- [ ] Later C0/C2/C3 adapters have one mapping test each before use. (blocked on C0/C2/C3)
 
 ## Risk Assessment
 
 - M3-only messages can accidentally become a second public contract. Keep `RouteSignal` intentionally lossy/internal and map frozen shared records only in adapters.
 - The pure Resource result cannot reserve capacity. Treat it as advisory until C3 proves the atomic reservation; never authorize a tool from the advisory result alone.
+
+## Decision: `farm_day`/`timezone` stay presence-only in READY NOW
+
+`ResourceInput.farm_day`/`timezone` are validated for presence but the day-boundary
+totals row (reservations straddling the configured farm-day timezone) is not
+implemented here. Day-boundary aggregation needs a durable ledger to sum against
+(C1/C3), so it belongs to the M4 ledger adapter, not the pure advisory policy.
+Reviewed 2026-08-16; keep as a documented placeholder until C1/C3 land, not a
+defect in this phase.
 - A generic agent superclass would add ceremony without behavior. Do not introduce one unless two concrete agents need shared executable logic, not just similar names.
 
 ## Rollback
