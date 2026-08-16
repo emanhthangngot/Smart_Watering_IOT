@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass
 from math import isfinite
 from typing import Any
@@ -13,7 +13,7 @@ from trust.rules import stuck_at
 from trust.rules.registry import hard_fails, soft_rules
 from trust.states import ReadingState, assign_state, is_usable
 
-DCS_POLICY_VERSION = "1"
+DCS_POLICY_VERSION = 1
 
 
 @dataclass(frozen=True)
@@ -26,7 +26,7 @@ class ScoreSnapshot:
     cap_applied: float | None
     rules_fired: tuple[str, ...]
     blocked_required_metrics: tuple[str, ...]
-    dcsPolicyVersion: str = DCS_POLICY_VERSION
+    dcsPolicyVersion: int = DCS_POLICY_VERSION
 
     def payload(self) -> dict[str, Any]:
         result = asdict(self)
@@ -45,18 +45,23 @@ def _spec_value(spec: Any, name: str, default: Any = None) -> Any:
     return field(spec, name, default)
 
 
-def _scope_metrics(scope: str, specs: Mapping[str, Any]) -> dict[str, tuple[float, bool]]:
-    """Accept the frozen registry's eventual shape or an explicit test mapping."""
-    selected = specs.get(scope, specs)
-    if not isinstance(selected, Mapping):
+def _scope_metrics(scope: str, specs: Any) -> dict[str, tuple[float, bool]]:
+    """Normalize M1's frozen MetricSpec tuple or an explicit mapping."""
+    selected = specs.get(scope, specs) if isinstance(specs, Mapping) else specs
+    if not isinstance(selected, Mapping) and not isinstance(selected, Iterable):
         return {}
     result: dict[str, tuple[float, bool]] = {}
-    for key, spec in selected.items():
+    entries = (
+        selected.items()
+        if isinstance(selected, Mapping)
+        else ((field(spec, "key"), spec) for spec in selected)
+    )
+    for key, spec in entries:
         weights = _spec_value(spec, "weights", _spec_value(spec, "scope_weights", {}))
         scoped_weight = weights.get(scope, 0) if isinstance(weights, Mapping) else 0
         weight = _spec_value(spec, "weight", _spec_value(spec, scope, scoped_weight))
-        required = _spec_value(spec, "required", False)
-        if isinstance(required, (list, tuple, set)):
+        required = _spec_value(spec, "required", _spec_value(spec, "required_scopes", False))
+        if isinstance(required, (list, tuple, set, frozenset)):
             required = scope in required
         elif isinstance(required, str):
             required = required == scope
@@ -106,12 +111,17 @@ def score_scope(
     bundle: Mapping[str, Any],
     windows: Any,
     scope: str,
-    specs: Mapping[str, Any],
+    specs: Any = None,
     *,
     ages: Mapping[str, float] | None = None,
     ttls: Mapping[str, float] | None = None,
+    fired_rules: Iterable[str] = (),
 ) -> ScoreSnapshot:
-    """Score one scope. The caller supplies M1's frozen registry mapping."""
+    """Score one scope against M1's frozen registry unless specs are supplied."""
+    if specs is None:
+        from registry.specs import SPECS
+
+        specs = SPECS
     metrics = _scope_metrics(scope, specs)
     prepared, hard_fired = apply_hard_fails(bundle, windows)
     total_weight = sum(weight for weight, _ in metrics.values())
@@ -160,9 +170,14 @@ def score_scope(
             or metric_freshness == 0
         ):
             required_unusable = True
-    soft_fired = tuple(
-        name for name, predicate in soft_rules().items() if predicate(prepared, windows)
-    )
+    hard_rule_names = set(hard_fails())
+    soft_rule_map = soft_rules()
+    evaluated_soft = {
+        name for name, predicate in soft_rule_map.items() if predicate(prepared, windows)
+    }
+    supplied_hard = {name for name in fired_rules if name in hard_rule_names}
+    supplied_soft = {name for name in fired_rules if name in soft_rule_map}
+    soft_fired = tuple(sorted(evaluated_soft | supplied_soft))
     penalties = []
     for name in soft_fired:
         module = __import__(f"trust.rules.{name}", fromlist=["PENALTY"])
@@ -181,6 +196,50 @@ def score_scope(
         consistency,
         min(raw, cap) if cap is not None else raw,
         cap,
-        tuple(sorted(set(hard_fired + soft_fired))),
+        tuple(sorted(set(hard_fired + tuple(supplied_hard) + soft_fired))),
         tuple(sorted(blocked_required)),
+    )
+
+
+def readings_to_bundle(readings: Iterable[Any]) -> dict[str, dict[str, Any]]:
+    """Adapt normalized/fixture readings to the trust engine's keyed bundle."""
+    bundle: dict[str, dict[str, Any]] = {}
+    for item in readings:
+        device = field(item, "device", field(item, "device_code"))
+        metric = field(item, "metric")
+        if not device or not metric:
+            continue
+        key = f"{device}.{metric}"
+        bundle[key] = {
+            "value": field(item, "value"),
+            "source_status": field(item, "source_status", "ok"),
+            "state": field(item, "state", field(item, "reading_status")),
+            "freshness": field(item, "freshness"),
+        }
+    return bundle
+
+
+def score_readings(
+    readings: Iterable[Any],
+    scope: str,
+    *,
+    windows: Any = None,
+    specs: Any = None,
+    fired_rules: Iterable[str] = (),
+    ages: Mapping[str, float] | None = None,
+    ttls: Mapping[str, float] | None = None,
+) -> ScoreSnapshot:
+    """Score normalized readings or an M1 fixture without copying registry data."""
+    readings = tuple(readings)
+    declared_rules = set(fired_rules)
+    if any(field(item, "stuck_at") is not None for item in readings):
+        declared_rules.add("stuck_at")
+    return score_scope(
+        readings_to_bundle(readings),
+        windows or {},
+        scope,
+        specs,
+        fired_rules=declared_rules,
+        ages=ages,
+        ttls=ttls,
     )

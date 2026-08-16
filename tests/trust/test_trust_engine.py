@@ -20,6 +20,7 @@ from trust.physics import (
 )
 from trust.rules.registry import hard_fails, soft_rules
 from trust.score import score_scope
+from trust.snapshots import snapshot_record
 from trust.states import ReadingState, assign_state
 from trust.tier import Tier, TierState, evaluate_tier
 
@@ -195,6 +196,12 @@ def test_tier_drops_immediately_but_raise_requires_streak_and_dwell() -> None:
     assert evaluate_tier(0.86, first_raise, now + timedelta(seconds=62)).tier is Tier.AUTO
 
 
+def test_tier_state_round_trips_for_persistence() -> None:
+    now = datetime.now(UTC)
+    state = TierState(Tier.PROPOSE, now, 1)
+    assert TierState.from_payload(state.payload()) == state
+
+
 def test_all_five_water_balance_diagnoses() -> None:
     pump_on = {"PUMP_01.flow_rate": 13.9, "PUMP_01.power": 646}
     assert pipe_leak(pump_on, {"TANK_01.level": [60, 59], "SOIL_01.soil_moisture": [36, 36]})
@@ -237,3 +244,27 @@ def test_expected_outcome_is_inconclusive_without_evidence() -> None:
     result = evaluate(outcome, {})
     assert result.result == "INCONCLUSIVE"
     assert result.assumptionId == "A3"
+
+
+def test_snapshot_record_matches_frozen_database_schema() -> None:
+    specs = {"irrigation_plan": {"TANK_01.level": {"weight": 1, "required": True}}}
+    snapshot = score_scope(
+        {"TANK_01.level": {"value": 59.8, "state": "FRESH"}},
+        {},
+        "irrigation_plan",
+        specs,
+    )
+    record = snapshot_record(snapshot, Tier.AUTO, 42, "ts_test")
+    assert record == {
+        "snapshot_id": "ts_test",
+        "scope": "irrigation_plan",
+        "dcs": 1.0,
+        "f": 1.0,
+        "c": 1.0,
+        "k": 1.0,
+        "cap_applied": None,
+        "tier": "AUTO",
+        "rules_fired": [],
+        "dcs_policy_version": 1,
+        "farm_state_version": 42,
+    }

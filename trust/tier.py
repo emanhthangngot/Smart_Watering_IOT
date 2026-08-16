@@ -19,6 +19,27 @@ class TierState:
     last_changed: datetime | None = None
     raise_streak: int = 0
 
+    def payload(self) -> dict[str, str | int | None]:
+        return {
+            "tier": self.tier.value if self.tier is not None else None,
+            "lastChanged": self.last_changed.isoformat() if self.last_changed is not None else None,
+            "raiseStreak": self.raise_streak,
+        }
+
+    @classmethod
+    def from_payload(cls, payload: dict[str, object]) -> TierState:
+        tier = Tier(str(payload["tier"])) if payload.get("tier") else None
+        changed = (
+            datetime.fromisoformat(str(payload["lastChanged"]))
+            if payload.get("lastChanged")
+            else None
+        )
+        try:
+            streak = max(0, int(payload.get("raiseStreak", 0)))
+        except (TypeError, ValueError):
+            streak = 0
+        return cls(tier, changed, streak)
+
 
 def tier_for_dcs(dcs: float) -> Tier:
     if dcs >= 0.85:
