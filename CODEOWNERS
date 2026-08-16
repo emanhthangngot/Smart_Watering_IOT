@@ -1,0 +1,35 @@
+# Generated from plans/reports/plan.md §13.3 + the worldstate/ addition (§2).
+# One owner per path. Do not hand-edit paths here without updating the
+# corresponding branch's Workspace Rules block.
+
+/contracts.py               @data-plane
+/config.py                  @dev
+/registry/                  @data-plane
+/ingest/                    @data-plane
+/sim/                       @data-plane
+/store/                     @data-plane
+/eval/                      @data-plane
+/fixtures/                  @data-plane
+/tests/data_plane/          @data-plane
+
+/trust/                     @trust-engine
+/tests/trust/                @trust-engine
+
+/worldstate/                 @agents
+/agents/                     @agents
+/graph/                      @agents
+/prompts/                    @agents
+/tests/agents/                @agents
+
+/tools/                      @tools-runner-api
+/schedule/                   @tools-runner-api
+/verify/                     @tools-runner-api
+/api/                        @tools-runner-api
+/tests/tools/                 @tools-runner-api
+
+/frontend/                   @operator-ux
+
+/tests/invariants/           @dev
+/docs/                       @dev
+/requirements/               @dev
+/scripts/                    @dev
