@@ -10,7 +10,7 @@ keys here and document them in .env.example under the right owner block.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 def _env(name: str, default: str | None = None) -> str:
@@ -28,15 +28,34 @@ class Config:
     mqtt_host: str
     mqtt_port: int
     mqtt_username: str
-    mqtt_password: str
+    mqtt_password: str = field(repr=False)
     mqtt_client_id: str
     mqtt_topic: str
     supabase_url: str
-    supabase_service_role_key: str
-    operator_token: str
+    supabase_service_role_key: str = field(repr=False)
+    operator_token: str = field(repr=False)
+    # --- coordination gate C5: LLM provider + security contract ---
+    # Empty llm_provider/llm_api_key means the LLM boundary is disabled —
+    # agents/planner.py's narrator is optional and always falls back to a
+    # deterministic result, so an unset LLM config is a safe default, not a
+    # missing-config error. Never log llm_api_key (repr=False below); never
+    # send a request outside llm_egress_allowlist.
+    llm_provider: str = ""
+    llm_model: str = ""
+    llm_api_key: str = field(default="", repr=False)
+    llm_timeout_seconds: float = 8.0
+    llm_max_output_tokens: int = 512
+    llm_egress_allowlist: tuple[str, ...] = ()
+
+    @property
+    def llm_enabled(self) -> bool:
+        """Fail-closed: the LLM boundary is usable only with both a
+        provider name and a credential; anything else must fall back."""
+        return bool(self.llm_provider and self.llm_api_key)
 
     @classmethod
-    def from_env(cls) -> "Config":
+    def from_env(cls) -> Config:
+        allowlist_raw = _env("LLM_EGRESS_ALLOWLIST", "")
         return cls(
             team_code=_env("TEAM_CODE", "VAMOS"),
             environment=_env("FARM_ENVIRONMENT", "FARM"),
@@ -50,4 +69,12 @@ class Config:
             supabase_url=_env("SUPABASE_URL", ""),
             supabase_service_role_key=_env("SUPABASE_SERVICE_ROLE_KEY", ""),
             operator_token=_env("OPERATOR_TOKEN", ""),
+            llm_provider=_env("LLM_PROVIDER", ""),
+            llm_model=_env("LLM_MODEL", ""),
+            llm_api_key=_env("LLM_API_KEY", ""),
+            llm_timeout_seconds=float(_env("LLM_TIMEOUT_SECONDS", "8.0")),
+            llm_max_output_tokens=int(_env("LLM_MAX_OUTPUT_TOKENS", "512")),
+            llm_egress_allowlist=tuple(
+                host.strip() for host in allowlist_raw.split(",") if host.strip()
+            ),
         )
